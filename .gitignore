@@ -1,0 +1,35 @@
+# OMX runtime and machine-local state
+.omx/state/
+.omx/logs/
+.omx/metrics.json
+.omx/hud-config.json
+.omx/setup-scope.json
+.omx/tmux-hook.json
+.omx/context/autopilot-*.md
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Java / Gradle
+.gradle/
+**/build/
+out/
+
+# Node / Next.js / Playwright
+node_modules/
+.next/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# IDE and OS files
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
