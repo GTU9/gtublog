@@ -1,0 +1,26 @@
+{
+  "name": "@gtublog/generation-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": "./dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint . --max-warnings=0",
+    "spike:codex": "tsx scripts/codex-sdk-spike.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@openai/codex-sdk": "0.142.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.4",
+    "@types/node": "24.13.2",
+    "eslint": "9.39.4",
+    "typescript": "5.9.3",
+    "tsx": "4.22.4",
+    "typescript-eslint": "8.62.0",
+    "vitest": "4.1.9"
+  }
+}
