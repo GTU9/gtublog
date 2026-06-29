@@ -3,6 +3,7 @@ package com.gtublog.auth;
 import com.gtublog.audit.AuditActorType;
 import com.gtublog.audit.AuditService;
 import com.gtublog.audit.AuditTargetType;
+import com.gtublog.observability.PlatformMetricsService;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -30,6 +31,7 @@ public class AuthService {
     private final AuthProperties authProperties;
     private final AuthRateLimiter authRateLimiter;
     private final Clock clock;
+    private final PlatformMetricsService platformMetricsService;
 
     public AuthService(
             AdminUserRepository adminUserRepository,
@@ -42,7 +44,8 @@ public class AuthService {
             AuditService auditService,
             AuthProperties authProperties,
             AuthRateLimiter authRateLimiter,
-            Clock clock) {
+            Clock clock,
+            PlatformMetricsService platformMetricsService) {
         this.adminUserRepository = adminUserRepository;
         this.refreshTokenFamilyRepository = refreshTokenFamilyRepository;
         this.refreshTokenRepository = refreshTokenRepository;
@@ -54,6 +57,7 @@ public class AuthService {
         this.authProperties = authProperties;
         this.authRateLimiter = authRateLimiter;
         this.clock = clock;
+        this.platformMetricsService = platformMetricsService;
     }
 
     @Transactional
@@ -66,6 +70,7 @@ public class AuthService {
                 .orElseThrow(AuthExceptions::invalidCredentials);
         var now = now();
         adminUser.markLoggedIn(now);
+        platformMetricsService.recordAuthEvent("login_success");
         auditService.record(
                 AuditActorType.ADMIN,
                 adminUser.getId().toString(),
@@ -95,11 +100,13 @@ public class AuthService {
         if (!family.isActiveAt(now) || !refreshToken.isUsableAt(now)) {
             family.revoke(now, "refresh-token-invalid");
             refreshToken.markReuseDetected(now);
+            platformMetricsService.recordAuthEvent("refresh_replay_detected");
             recordRefreshFailure(family, "AUTH_REFRESH_REPLAY_DETECTED");
             throw AuthExceptions.invalidRefreshToken();
         }
 
         if (!tokenHashingService.sha256(csrfToken).equals(family.getCsrfTokenHash())) {
+            platformMetricsService.recordAuthEvent("refresh_csrf_rejected");
             recordRefreshFailure(family, "AUTH_REFRESH_CSRF_REJECTED");
             throw AuthExceptions.invalidCsrf();
         }
@@ -109,6 +116,7 @@ public class AuthService {
                 .orElseThrow(AuthExceptions::invalidCredentials);
 
         refreshToken.markRotated(now);
+        platformMetricsService.recordAuthEvent("refresh_rotated");
         return issueSession(adminUser, refreshToken, now);
     }
 
@@ -130,6 +138,7 @@ public class AuthService {
         }
         family.revoke(now, "logout");
         refreshToken.markRevoked(now);
+        platformMetricsService.recordAuthEvent("logout");
         auditService.record(
                 AuditActorType.ADMIN,
                 family.getAdminUserId().toString(),

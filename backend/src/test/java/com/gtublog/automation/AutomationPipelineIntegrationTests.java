@@ -274,6 +274,56 @@ class AutomationPipelineIntegrationTests {
         assertThat(snapshotCount).isEqualTo(1);
     }
 
+    @Test
+    void administratorCanReadAutomationDiagnosticsSummary() throws Exception {
+        stubAccessibleSource("/diagnostics-feed");
+        var bearerToken = bearerToken();
+
+        long topicId = jsonBody(mockMvc.perform(post("/api/v1/admin/automation/topics")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"Diagnostics Topic",
+                                  "promptTemplateVersion":"v1",
+                                  "publicationEnabled":true
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn()).get("id").asLong();
+
+        mockMvc.perform(post("/api/v1/admin/automation/topics/{topicId}/sources", topicId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "sourceType":"HTML",
+                                  "sourceUrl":"%s",
+                                  "enabled":true
+                                }
+                                """.formatted(WIREMOCK.baseUrl() + "/diagnostics-feed")))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(post("/api/v1/admin/automation/topics/{topicId}/runs/manual", topicId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"idempotencyKey":"story-10-diagnostics"}
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/admin/automation/diagnostics")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    var json = jsonBody(result);
+                    assertThat(json.at("/runCounts/succeeded").asLong()).isGreaterThanOrEqualTo(1L);
+                    assertThat(json.at("/jobCounts/pending").asLong()).isGreaterThanOrEqualTo(0L);
+                    assertThat(json.at("/outboxCounts/pending").asLong()).isGreaterThanOrEqualTo(0L);
+                    assertThat(json.at("/generatedAt").asText()).isNotBlank();
+                });
+    }
+
     private void stubAccessibleSource(String path) {
         WIREMOCK.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get(urlEqualTo(path))
                 .willReturn(aResponse()

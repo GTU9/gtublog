@@ -5,6 +5,7 @@ import type {
   AdminPostPage,
   AdminPostUpsertRequest,
   AuditPage,
+  AutomationDiagnosticsResponse,
   AutomationOutboxResponse,
   AutomationRunDetailResponse,
   AutomationRunResponse,
@@ -24,6 +25,7 @@ import {
   mockDeleteCategory,
   mockDeleteTag,
   mockAutomationOutbox,
+  mockAutomationDiagnostics,
   mockAutomationRunDetail,
   mockAutomationRuns,
   mockAutomationSchedules,
@@ -338,6 +340,18 @@ export async function fetchAutomationRuns(authenticatedFetch: (input: string, in
       return mockAutomationRuns();
     }
     throw new Error("Failed to fetch automation runs.");
+  }
+}
+
+export async function fetchAutomationDiagnostics(authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/diagnostics`);
+    return await parseOrThrow<AutomationDiagnosticsResponse>(response, "Failed to fetch automation diagnostics.");
+  } catch {
+    if (isDevelopmentRuntime()) {
+      return mockAutomationDiagnostics();
+    }
+    throw new Error("Failed to fetch automation diagnostics.");
   }
 }
 

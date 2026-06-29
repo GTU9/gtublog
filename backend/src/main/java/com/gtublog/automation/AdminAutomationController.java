@@ -93,6 +93,11 @@ public class AdminAutomationController {
         return automationAdminService.runDetail(runId);
     }
 
+    @GetMapping("/diagnostics")
+    public AutomationDiagnosticsResponse diagnostics() {
+        return automationAdminService.diagnostics();
+    }
+
     @GetMapping("/outbox")
     public List<AutomationOutboxResponse> outbox() {
         return automationAdminService.outbox();

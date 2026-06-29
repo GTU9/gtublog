@@ -1,5 +1,6 @@
 package com.gtublog.automation;
 
+import com.gtublog.observability.PlatformMetricsService;
 import com.gtublog.source.SourcePolicyResult;
 import com.gtublog.source.SourceSnapshot;
 import com.gtublog.source.SourceSnapshotRepository;
@@ -27,9 +28,11 @@ public class SourceCollectionService {
             .build();
 
     private final SourceSnapshotRepository sourceSnapshotRepository;
+    private final PlatformMetricsService platformMetricsService;
 
-    public SourceCollectionService(SourceSnapshotRepository sourceSnapshotRepository) {
+    public SourceCollectionService(SourceSnapshotRepository sourceSnapshotRepository, PlatformMetricsService platformMetricsService) {
         this.sourceSnapshotRepository = sourceSnapshotRepository;
+        this.platformMetricsService = platformMetricsService;
     }
 
     public CollectionResult collect(Long topicId, Long runId, List<AutomationSource> sources) {
@@ -72,7 +75,9 @@ public class SourceCollectionService {
                     sha256(body),
                     response.statusCode() >= 200 && response.statusCode() < 300 ? SourcePolicyResult.ALLOWED : SourcePolicyResult.HELD,
                     excerpt(body));
-            return sourceSnapshotRepository.save(snapshot);
+            var saved = sourceSnapshotRepository.save(snapshot);
+            platformMetricsService.recordSourceSnapshot(saved.getPolicyResult().name(), source.getSourceType().name());
+            return saved;
         } catch (Exception exception) {
             var snapshot = SourceSnapshot.create(
                     UUID.randomUUID().toString(),
@@ -90,7 +95,9 @@ public class SourceCollectionService {
                     sha256(exception.getMessage()),
                     SourcePolicyResult.HELD,
                     excerpt(exception.getMessage()));
-            return sourceSnapshotRepository.save(snapshot);
+            var saved = sourceSnapshotRepository.save(snapshot);
+            platformMetricsService.recordSourceSnapshot(saved.getPolicyResult().name(), source.getSourceType().name());
+            return saved;
         }
     }
 

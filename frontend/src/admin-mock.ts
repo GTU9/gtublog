@@ -5,6 +5,7 @@ import type {
   AdminProfile,
   AuditPage,
   AuditEntryResponse,
+  AutomationDiagnosticsResponse,
   AutomationOutboxResponse,
   AutomationRunDetailResponse,
   AutomationRunResponse,
@@ -433,6 +434,30 @@ export function mockTriggerAutomationRun(topicId: number) {
 
 export function mockAutomationOutbox() {
   return automationOutboxStore.map((item) => ({ ...item }));
+}
+
+export function mockAutomationDiagnostics(): AutomationDiagnosticsResponse {
+  return {
+    runCounts: {
+      running: 0,
+      succeeded: automationRunsStore.filter((item) => item.status === "SUCCEEDED").length,
+      held: automationRunsStore.filter((item) => item.status === "HELD").length,
+      failed: automationRunsStore.filter((item) => item.status === "FAILED").length,
+    },
+    jobCounts: {
+      pending: 1,
+      claimed: 0,
+      submitted: 2,
+      failed: 0,
+    },
+    outboxCounts: {
+      pending: automationOutboxStore.filter((item) => item.deliveryStatus === "PENDING").length,
+      delivered: automationOutboxStore.filter((item) => item.deliveryStatus === "DELIVERED").length,
+    },
+    heldSnapshotCount: 1,
+    recentHoldReasons: automationRunsStore.map((item) => item.holdReason).filter((item): item is string => Boolean(item)),
+    generatedAt: new Date().toISOString(),
+  };
 }
 
 export function mockProcessAutomationOutbox() {

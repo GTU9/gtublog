@@ -3,6 +3,7 @@ package com.gtublog.automation;
 import com.gtublog.audit.AuditActorType;
 import com.gtublog.audit.AuditService;
 import com.gtublog.audit.AuditTargetType;
+import com.gtublog.observability.PlatformMetricsService;
 import com.gtublog.source.SourceSnapshot;
 import com.gtublog.source.SourceSnapshotRepository;
 import java.time.LocalDateTime;
@@ -27,6 +28,7 @@ public class GenerationJobService {
     private final AutomationProperties automationProperties;
     private final AuditService auditService;
     private final AutomationPublicationService automationPublicationService;
+    private final PlatformMetricsService platformMetricsService;
     private final ObjectMapper objectMapper;
 
     public GenerationJobService(
@@ -37,6 +39,7 @@ public class GenerationJobService {
             AutomationProperties automationProperties,
             AuditService auditService,
             AutomationPublicationService automationPublicationService,
+            PlatformMetricsService platformMetricsService,
             ObjectMapper objectMapper) {
         this.generationJobRepository = generationJobRepository;
         this.sourceSnapshotRepository = sourceSnapshotRepository;
@@ -45,6 +48,7 @@ public class GenerationJobService {
         this.automationProperties = automationProperties;
         this.auditService = auditService;
         this.automationPublicationService = automationPublicationService;
+        this.platformMetricsService = platformMetricsService;
         this.objectMapper = objectMapper;
     }
 
@@ -76,6 +80,7 @@ public class GenerationJobService {
         var leaseExpiresAt = now.plus(automationProperties.worker().leaseDuration());
         var job = jobs.getFirst();
         job.claim(request.workerId(), leaseExpiresAt, now);
+        platformMetricsService.recordGenerationJobEvent("claimed");
         auditService.record(
                 AuditActorType.WORKER,
                 request.workerId(),
@@ -121,6 +126,7 @@ public class GenerationJobService {
         if (request.failureReason() != null && !request.failureReason().isBlank()) {
             job.fail(request.workerId(), request.failureReason(), now);
             automationRunRepository.findById(job.getRunId()).ifPresent(run -> run.markFailed(request.failureReason(), now));
+            platformMetricsService.recordGenerationJobEvent("failed");
             auditService.record(
                     AuditActorType.WORKER,
                     request.workerId(),
@@ -139,6 +145,7 @@ public class GenerationJobService {
                 "excerpt", request.draft().excerpt(),
                 "contentMarkdown", request.draft().contentMarkdown(),
                 "citationSnapshotIds", request.draft().citationSnapshotIds() == null ? List.of() : request.draft().citationSnapshotIds())), now);
+        platformMetricsService.recordGenerationJobEvent("submitted");
         var publicationDecision = automationPublicationService.processSubmission(job, request);
         var auditDetail = new LinkedHashMap<String, Object>();
         auditDetail.put("citationCount", request.draft().citationSnapshotIds() == null ? 0 : request.draft().citationSnapshotIds().size());
@@ -160,6 +167,11 @@ public class GenerationJobService {
                 "GENERATION_JOB_SUBMITTED",
                 auditDetail);
         return new GenerationJobSubmitResponse(job.getId(), job.getJobStatus().name(), job.getSubmittedAt());
+    }
+
+    @Transactional(readOnly = true)
+    public long countByStatus(GenerationJobStatus status) {
+        return generationJobRepository.countByJobStatus(status);
     }
 
     private void authorize(String workerToken) {
