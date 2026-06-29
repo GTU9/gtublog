@@ -18,4 +18,9 @@
 3. Follow [`docs/development.md`](docs/development.md).
 4. Use the quality commands defined in [`AGENTS.md`](AGENTS.md).
 
+## Verification paths
+
+- Local quality gate: run the commands documented in [`docs/development.md`](docs/development.md) and [`AGENTS.md`](AGENTS.md).
+- Remote quality gate: GitHub Actions runs the same repository checks from [`.github/workflows/ci.yml`](.github/workflows/ci.yml) on `prototype`, `story/**`, and pull requests into `prototype`.
+
 Approved requirements and test contracts live under `.omx/specs/` and `.omx/plans/`. Development branches from `prototype` into one reviewed story branch at a time.
