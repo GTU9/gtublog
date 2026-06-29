@@ -1,0 +1,12 @@
+{
+  "workerId": "worker-a",
+  "providerName": "fake-provider",
+  "promptVersion": "prompt-v1",
+  "schemaVersion": "automation-job-v1",
+  "draft": {
+    "title": "자동 수집 초안",
+    "excerpt": "핵심 내용을 요약한 초안입니다.",
+    "contentMarkdown": "# 자동 수집 초안\n\n본문",
+    "citationSnapshotIds": [1]
+  }
+}

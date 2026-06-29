@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gtublog.dev/contracts/automation/v1/submit-request.schema.json",
+  "type": "object",
+  "required": ["workerId", "providerName", "promptVersion", "schemaVersion"],
+  "properties": {
+    "workerId": { "type": "string", "minLength": 1 },
+    "providerName": { "type": "string", "minLength": 1 },
+    "promptVersion": { "type": "string", "minLength": 1 },
+    "schemaVersion": { "type": "string", "minLength": 1 },
+    "failureReason": { "type": "string" },
+    "draft": {
+      "type": "object",
+      "required": ["title", "excerpt", "contentMarkdown", "citationSnapshotIds"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "excerpt": { "type": "string", "minLength": 1 },
+        "contentMarkdown": { "type": "string", "minLength": 1 },
+        "citationSnapshotIds": {
+          "type": "array",
+          "items": { "type": "integer" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

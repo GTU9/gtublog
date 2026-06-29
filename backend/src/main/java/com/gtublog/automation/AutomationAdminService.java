@@ -32,6 +32,7 @@ public class AutomationAdminService {
     private final AuditService auditService;
     private final SourceCollectionService sourceCollectionService;
     private final AutomationScheduleSynchronizer automationScheduleSynchronizer;
+    private final GenerationJobService generationJobService;
 
     public AutomationAdminService(
             AutomationTopicRepository automationTopicRepository,
@@ -42,7 +43,8 @@ public class AutomationAdminService {
             SlugService slugService,
             AuditService auditService,
             SourceCollectionService sourceCollectionService,
-            AutomationScheduleSynchronizer automationScheduleSynchronizer) {
+            AutomationScheduleSynchronizer automationScheduleSynchronizer,
+            GenerationJobService generationJobService) {
         this.automationTopicRepository = automationTopicRepository;
         this.automationSourceRepository = automationSourceRepository;
         this.automationScheduleRepository = automationScheduleRepository;
@@ -52,6 +54,7 @@ public class AutomationAdminService {
         this.auditService = auditService;
         this.sourceCollectionService = sourceCollectionService;
         this.automationScheduleSynchronizer = automationScheduleSynchronizer;
+        this.generationJobService = generationJobService;
     }
 
     @Transactional(readOnly = true)
@@ -208,6 +211,8 @@ public class AutomationAdminService {
 
         var result = sourceCollectionService.collect(topicId, creation.run().getId(), enabledSources);
         if (result.holdReason() == null) {
+            var topic = automationTopicRepository.findById(topicId).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
+            generationJobService.enqueueForRun(topic, creation.run(), result.snapshots());
             completeRunAsSucceeded(creation.run().getId());
         } else {
             completeRunAsHeld(creation.run().getId(), result.holdReason());

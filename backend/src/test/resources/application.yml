@@ -53,3 +53,9 @@ app:
         7V+HUq9LrCYVc3213UX31dqKOzV/7otN8drWmQfWnwGw3fPSHmiLVBz9RwubndWB
         BhD9TPSydm4Sn09lJ45sfMDD
         -----END PRIVATE KEY-----
+  automation:
+    worker:
+      shared-token: worker-test-token
+      lease-duration: PT5M
+      preferred-provider: fake-provider
+      schema-version: automation-job-v1
