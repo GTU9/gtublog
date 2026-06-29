@@ -260,6 +260,15 @@ class ContentApiIntegrationTests {
                         .header(HttpHeaders.AUTHORIZATION, bearerToken))
                 .andExpect(status().isOk())
                 .andExpect(result -> assertThat(jsonBody(result).at("/items/0/status").asText()).isEqualTo("DRAFT"));
+
+        mockMvc.perform(get("/api/v1/admin/audit")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    var json = jsonBody(result);
+                    assertThat(json.at("/items/0/actionType").asText()).isEqualTo("POST_RESTORED");
+                    assertThat(json.at("/totalElements").asInt()).isGreaterThanOrEqualTo(1);
+                });
     }
 
     private long taxonomyId(MvcResult result) throws Exception {
