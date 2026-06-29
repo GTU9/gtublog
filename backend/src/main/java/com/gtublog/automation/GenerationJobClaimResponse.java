@@ -1,0 +1,29 @@
+package com.gtublog.automation;
+
+import java.time.LocalDateTime;
+import java.util.List;
+
+public record GenerationJobClaimResponse(
+        Long jobId,
+        String jobKey,
+        Long runId,
+        Long topicId,
+        String leaseOwner,
+        LocalDateTime leaseExpiresAt,
+        String providerName,
+        String promptVersion,
+        String schemaVersion,
+        String prompt,
+        List<SourceSnapshotInput> snapshots) {
+
+    public record SourceSnapshotInput(
+            Long snapshotId,
+            String sourceUrl,
+            String canonicalUrl,
+            String title,
+            String originHost,
+            String bodyExcerpt,
+            String contentHash,
+            LocalDateTime retrievedAt) {
+    }
+}

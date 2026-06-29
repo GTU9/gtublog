@@ -22,6 +22,11 @@ class ApiExceptionHandler {
         return problemDetail(HttpStatus.BAD_REQUEST, "Bad request", exception.getMessage());
     }
 
+    @ExceptionHandler(IllegalStateException.class)
+    ProblemDetail handleIllegalState(IllegalStateException exception) {
+        return problemDetail(HttpStatus.BAD_REQUEST, "Bad request", exception.getMessage());
+    }
+
     @ExceptionHandler(BadCredentialsException.class)
     ProblemDetail handleBadCredentials(BadCredentialsException exception) {
         return problemDetail(HttpStatus.UNAUTHORIZED, "Authentication failed", "Invalid credentials.");

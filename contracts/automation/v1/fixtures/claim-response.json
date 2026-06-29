@@ -1,0 +1,24 @@
+{
+  "jobId": 41,
+  "jobKey": "job-41",
+  "runId": 19,
+  "topicId": 7,
+  "leaseOwner": "worker-a",
+  "leaseExpiresAt": "2026-06-29T23:30:00",
+  "providerName": "fake-provider",
+  "promptVersion": "prompt-v1",
+  "schemaVersion": "automation-job-v1",
+  "prompt": "검증된 출처만 이용해 초안을 작성하라.",
+  "snapshots": [
+    {
+      "snapshotId": 1,
+      "sourceUrl": "https://example.com/article",
+      "canonicalUrl": "https://example.com/article",
+      "title": "Example article",
+      "originHost": "example.com",
+      "bodyExcerpt": "Example excerpt",
+      "contentHash": "abc123",
+      "retrievedAt": "2026-06-29T23:00:00"
+    }
+  ]
+}

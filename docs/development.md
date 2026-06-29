@@ -22,7 +22,7 @@ backend\gradlew.bat bootRun
 pnpm --dir frontend dev
 ```
 
-The generation worker only exposes a provider-neutral library in Story 1. Durable job polling begins in Story 8.
+Story 8 adds the shared generation-job contract, internal worker claim/submit API, and provider-neutral worker runtime. Long-running polling/hosting remains an application choice; the repository currently validates the worker through library/runtime tests and backend integration coverage.
 
 ## Quality gates
 

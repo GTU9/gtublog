@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gtublog.dev/contracts/automation/v1/claim-response.schema.json",
+  "type": "object",
+  "required": [
+    "jobId",
+    "jobKey",
+    "runId",
+    "topicId",
+    "leaseOwner",
+    "leaseExpiresAt",
+    "providerName",
+    "promptVersion",
+    "schemaVersion",
+    "prompt",
+    "snapshots"
+  ],
+  "properties": {
+    "jobId": { "type": "integer" },
+    "jobKey": { "type": "string" },
+    "runId": { "type": "integer" },
+    "topicId": { "type": "integer" },
+    "leaseOwner": { "type": "string" },
+    "leaseExpiresAt": { "type": "string" },
+    "providerName": { "type": "string" },
+    "promptVersion": { "type": "string" },
+    "schemaVersion": { "type": "string" },
+    "prompt": { "type": "string" },
+    "snapshots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "snapshotId",
+          "sourceUrl",
+          "canonicalUrl",
+          "title",
+          "originHost",
+          "bodyExcerpt",
+          "contentHash",
+          "retrievedAt"
+        ],
+        "properties": {
+          "snapshotId": { "type": "integer" },
+          "sourceUrl": { "type": "string" },
+          "canonicalUrl": { "type": "string" },
+          "title": { "type": ["string", "null"] },
+          "originHost": { "type": "string" },
+          "bodyExcerpt": { "type": ["string", "null"] },
+          "contentHash": { "type": "string" },
+          "retrievedAt": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

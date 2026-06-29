@@ -38,6 +38,12 @@ app:
     keys:
       public-key-pem: ${AUTH_PUBLIC_KEY_PEM:}
       private-key-pem: ${AUTH_PRIVATE_KEY_PEM:}
+  automation:
+    worker:
+      shared-token: ${AUTOMATION_WORKER_SHARED_TOKEN:change-me-worker-token}
+      lease-duration: ${AUTOMATION_WORKER_LEASE_DURATION:PT5M}
+      preferred-provider: ${AUTOMATION_WORKER_PROVIDER:codex-sdk}
+      schema-version: ${AUTOMATION_WORKER_SCHEMA_VERSION:automation-job-v1}
 
 management:
   endpoints:
