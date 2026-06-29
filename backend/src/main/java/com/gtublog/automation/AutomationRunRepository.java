@@ -9,4 +9,8 @@ public interface AutomationRunRepository extends JpaRepository<AutomationRun, Lo
     Optional<AutomationRun> findByIdempotencyKey(String idempotencyKey);
 
     List<AutomationRun> findTop20ByOrderByCreatedAtDesc();
+
+    long countByStatus(AutomationRunStatus status);
+
+    List<AutomationRun> findTop5ByStatusOrderByUpdatedAtDesc(AutomationRunStatus status);
 }

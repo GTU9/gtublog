@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -44,7 +45,7 @@ import tools.jackson.databind.ObjectMapper;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 
 @Tag("docker")
-@SpringBootTest
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 @Import(AuthIntegrationTests.TestAdminProbeController.class)
 class AuthIntegrationTests {
 
@@ -89,6 +90,9 @@ class AuthIntegrationTests {
 
     @Autowired
     private AuditEntryRepository auditEntryRepository;
+
+    @LocalServerPort
+    private int port;
 
     @Autowired
     void configureMockMvc(WebApplicationContext context) {
@@ -213,6 +217,23 @@ class AuthIntegrationTests {
                         .header("Access-Control-Request-Method", "POST")
                         .header("Access-Control-Request-Headers", "X-CSRF-Token"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void securityHeadersAndPrometheusEndpointAreExposed() throws Exception {
+        var loginResult = login();
+        assertThat(loginResult.getResponse().getHeader("Content-Security-Policy")).contains("default-src 'self'");
+        assertThat(loginResult.getResponse().getHeader("Referrer-Policy")).isEqualTo("strict-origin-when-cross-origin");
+        assertThat(loginResult.getResponse().getHeader("X-Frame-Options")).isEqualTo("DENY");
+        assertThat(loginResult.getResponse().getHeader("Permissions-Policy")).contains("geolocation=()");
+
+        var prometheus = org.springframework.web.client.RestClient.create()
+                .get()
+                .uri("http://localhost:" + port + "/actuator/prometheus")
+                .retrieve()
+                .toEntity(String.class);
+        assertThat(prometheus.getStatusCode().value()).isEqualTo(200);
+        assertThat(prometheus.getBody()).contains("gtublog_auth_events_total");
     }
 
     @Test

@@ -48,13 +48,3 @@ app:
       base-url: ${AUTOMATION_REVALIDATION_BASE_URL:}
       shared-secret: ${AUTOMATION_REVALIDATION_SHARED_SECRET:change-me-revalidation-secret}
       retry-delay: ${AUTOMATION_REVALIDATION_RETRY_DELAY:PT1M}
-
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info
-  endpoint:
-    health:
-      probes:
-        enabled: true

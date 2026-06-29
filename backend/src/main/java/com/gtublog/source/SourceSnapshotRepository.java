@@ -8,6 +8,8 @@ public interface SourceSnapshotRepository extends JpaRepository<SourceSnapshot, 
 
     long countByAutomationRunId(Long automationRunId);
 
+    long countByPolicyResult(SourcePolicyResult policyResult);
+
     List<SourceSnapshot> findAllByAutomationRunIdOrderByCreatedAtAsc(Long automationRunId);
 
     @Query(value = """

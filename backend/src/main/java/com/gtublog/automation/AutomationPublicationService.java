@@ -3,6 +3,7 @@ package com.gtublog.automation;
 import com.gtublog.audit.AuditActorType;
 import com.gtublog.audit.AuditService;
 import com.gtublog.audit.AuditTargetType;
+import com.gtublog.observability.PlatformMetricsService;
 import com.gtublog.post.Post;
 import com.gtublog.post.PostRepository;
 import com.gtublog.post.PostRevision;
@@ -15,6 +16,7 @@ import com.gtublog.source.SourceSnapshot;
 import com.gtublog.source.SourceSnapshotRepository;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -39,6 +41,7 @@ public class AutomationPublicationService {
     private final AuditService auditService;
     private final SlugService slugService;
     private final Clock clock;
+    private final PlatformMetricsService platformMetricsService;
 
     public AutomationPublicationService(
             GenerationJobRepository generationJobRepository,
@@ -51,7 +54,8 @@ public class AutomationPublicationService {
             PublicationOutboxService publicationOutboxService,
             AuditService auditService,
             SlugService slugService,
-            Clock clock) {
+            Clock clock,
+            PlatformMetricsService platformMetricsService) {
         this.generationJobRepository = generationJobRepository;
         this.automationRunRepository = automationRunRepository;
         this.automationTopicRepository = automationTopicRepository;
@@ -63,6 +67,7 @@ public class AutomationPublicationService {
         this.auditService = auditService;
         this.slugService = slugService;
         this.clock = clock;
+        this.platformMetricsService = platformMetricsService;
     }
 
     @Transactional
@@ -73,14 +78,17 @@ public class AutomationPublicationService {
 
         if (!topic.isPublicationEnabled()) {
             run.markHeld("Automatic publication is disabled for this topic.", now());
+            recordDecision(run, "held", "publication_disabled");
             return PublicationDecision.held("Automatic publication is disabled for this topic.");
         }
         if (citedSnapshots.isEmpty() || citedSnapshots.stream().anyMatch(snapshot -> snapshot.getPolicyResult() != SourcePolicyResult.ALLOWED)) {
             run.markHeld("One or more required source snapshots are inaccessible or blocked.", now());
+            recordDecision(run, "held", "source_blocked");
             return PublicationDecision.held("One or more required source snapshots are inaccessible or blocked.");
         }
         if (distinctOrigins(citedSnapshots) < 2) {
             run.markHeld("Material claims require corroboration across at least two independent origin hosts.", now());
+            recordDecision(run, "held", "insufficient_origins");
             return PublicationDecision.held("Material claims require corroboration across at least two independent origin hosts.");
         }
 
@@ -92,6 +100,7 @@ public class AutomationPublicationService {
         if (postRepository.existsBySourceFingerprint(fingerprint)
                 || (!canonicalUrls.isEmpty() && sourceSnapshotRepository.countPublishedCitationsForCanonicalUrls(canonicalUrls) > 0)) {
             run.markHeld("A matching canonical source or content fingerprint has already been published.", now());
+            recordDecision(run, "held", "duplicate");
             return PublicationDecision.held("A matching canonical source or content fingerprint has already been published.");
         }
 
@@ -118,6 +127,7 @@ public class AutomationPublicationService {
         }
         publicationOutboxService.enqueuePostPublished(post.getId(), post.getSlug());
         run.markSucceeded(now());
+        recordDecision(run, "published", "published");
         auditService.record(
                 AuditActorType.SYSTEM,
                 "automation",
@@ -194,6 +204,13 @@ public class AutomationPublicationService {
 
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+    }
+
+    private void recordDecision(AutomationRun run, String outcome, String reason) {
+        platformMetricsService.recordPublicationDecision(outcome, reason);
+        if (run.getStartedAt() != null) {
+            platformMetricsService.recordPublicationDuration(Duration.between(run.getStartedAt(), now()), outcome);
+        }
     }
 
     public record PublicationDecision(boolean published, Long postId, String slug, String holdReason) {

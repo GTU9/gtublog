@@ -134,3 +134,25 @@ export type AutomationOutboxResponse = {
   lastAttemptAt: string | null;
   createdAt: string;
 };
+
+export type AutomationDiagnosticsResponse = {
+  runCounts: {
+    running: number;
+    succeeded: number;
+    held: number;
+    failed: number;
+  };
+  jobCounts: {
+    pending: number;
+    claimed: number;
+    submitted: number;
+    failed: number;
+  };
+  outboxCounts: {
+    pending: number;
+    delivered: number;
+  };
+  heldSnapshotCount: number;
+  recentHoldReasons: string[];
+  generatedAt: string;
+};

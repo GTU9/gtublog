@@ -3,7 +3,9 @@ package com.gtublog.automation;
 import com.gtublog.audit.AuditActorType;
 import com.gtublog.audit.AuditService;
 import com.gtublog.audit.AuditTargetType;
+import com.gtublog.observability.PlatformMetricsService;
 import com.gtublog.post.SlugService;
+import com.gtublog.source.SourcePolicyResult;
 import com.gtublog.source.SourceSnapshotRepository;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -34,6 +36,7 @@ public class AutomationAdminService {
     private final AutomationScheduleSynchronizer automationScheduleSynchronizer;
     private final GenerationJobService generationJobService;
     private final PublicationOutboxService publicationOutboxService;
+    private final PlatformMetricsService platformMetricsService;
 
     public AutomationAdminService(
             AutomationTopicRepository automationTopicRepository,
@@ -46,7 +49,8 @@ public class AutomationAdminService {
             SourceCollectionService sourceCollectionService,
             AutomationScheduleSynchronizer automationScheduleSynchronizer,
             GenerationJobService generationJobService,
-            PublicationOutboxService publicationOutboxService) {
+            PublicationOutboxService publicationOutboxService,
+            PlatformMetricsService platformMetricsService) {
         this.automationTopicRepository = automationTopicRepository;
         this.automationSourceRepository = automationSourceRepository;
         this.automationScheduleRepository = automationScheduleRepository;
@@ -58,6 +62,7 @@ public class AutomationAdminService {
         this.automationScheduleSynchronizer = automationScheduleSynchronizer;
         this.generationJobService = generationJobService;
         this.publicationOutboxService = publicationOutboxService;
+        this.platformMetricsService = platformMetricsService;
     }
 
     @Transactional(readOnly = true)
@@ -185,6 +190,31 @@ public class AutomationAdminService {
     }
 
     @Transactional(readOnly = true)
+    public AutomationDiagnosticsResponse diagnostics() {
+        var recentHoldReasons = automationRunRepository.findTop5ByStatusOrderByUpdatedAtDesc(AutomationRunStatus.HELD).stream()
+                .map(AutomationRun::getHoldReason)
+                .filter(reason -> reason != null && !reason.isBlank())
+                .toList();
+        return new AutomationDiagnosticsResponse(
+                new AutomationDiagnosticsResponse.RunCounts(
+                        automationRunRepository.countByStatus(AutomationRunStatus.RUNNING),
+                        automationRunRepository.countByStatus(AutomationRunStatus.SUCCEEDED),
+                        automationRunRepository.countByStatus(AutomationRunStatus.HELD),
+                        automationRunRepository.countByStatus(AutomationRunStatus.FAILED)),
+                new AutomationDiagnosticsResponse.JobCounts(
+                        generationJobService.countByStatus(GenerationJobStatus.PENDING),
+                        generationJobService.countByStatus(GenerationJobStatus.CLAIMED),
+                        generationJobService.countByStatus(GenerationJobStatus.SUBMITTED),
+                        generationJobService.countByStatus(GenerationJobStatus.FAILED)),
+                new AutomationDiagnosticsResponse.OutboxCounts(
+                        publicationOutboxService.countByStatus("PENDING"),
+                        publicationOutboxService.countByStatus("DELIVERED")),
+                sourceSnapshotRepository.countByPolicyResult(SourcePolicyResult.HELD),
+                recentHoldReasons,
+                LocalDateTime.now(ZoneOffset.UTC));
+    }
+
+    @Transactional(readOnly = true)
     public List<AutomationOutboxResponse> outbox() {
         return publicationOutboxService.recentEvents();
     }
@@ -262,6 +292,7 @@ public class AutomationAdminService {
     protected void completeRunAsSucceeded(Long runId) {
         var run = automationRunRepository.findById(runId).orElseThrow(() -> new NoSuchElementException("Automation run not found."));
         run.markSucceeded(LocalDateTime.now(ZoneOffset.UTC));
+        platformMetricsService.recordPublicationDecision("run_succeeded", run.getTriggerType());
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, run.getId().toString(), "AUTOMATION_RUN_SUCCEEDED", Map.of("snapshotCount", sourceSnapshotRepository.countByAutomationRunId(runId)));
     }
 
@@ -269,6 +300,7 @@ public class AutomationAdminService {
     protected void completeRunAsHeld(Long runId, String holdReason) {
         var run = automationRunRepository.findById(runId).orElseThrow(() -> new NoSuchElementException("Automation run not found."));
         run.markHeld(holdReason, LocalDateTime.now(ZoneOffset.UTC));
+        platformMetricsService.recordPublicationDecision("run_held", holdReason);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, run.getId().toString(), "AUTOMATION_RUN_HELD", Map.of("holdReason", holdReason));
     }
 

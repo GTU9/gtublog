@@ -17,6 +17,8 @@ public interface GenerationJobRepository extends JpaRepository<GenerationJob, Lo
 
     long countByRunId(Long runId);
 
+    long countByJobStatus(GenerationJobStatus status);
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             select job

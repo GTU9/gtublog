@@ -8,6 +8,7 @@ import type {
   AdminPostPage,
   AuditPage,
   AuditEntryResponse,
+  AutomationDiagnosticsResponse,
   AutomationOutboxResponse,
   AutomationRunDetailResponse,
   AutomationRunResponse,
@@ -155,6 +156,7 @@ export function DashboardStats({
 }
 
 export function AutomationOverview({
+  diagnostics,
   topics,
   selectedTopicId,
   sources,
@@ -169,6 +171,7 @@ export function AutomationOverview({
   onSelectRun,
   onProcessOutbox,
 }: {
+  diagnostics: AutomationDiagnosticsResponse | null;
   topics: AutomationTopicResponse[];
   selectedTopicId: number | null;
   sources: AutomationSourceResponse[];
@@ -185,6 +188,27 @@ export function AutomationOverview({
 }) {
   return (
     <div className="stack">
+      {diagnostics ? (
+        <div className="admin-stats">
+          <article className="admin-card">
+            <h3>Runs succeeded</h3>
+            <p className="stat-value">{diagnostics.runCounts.succeeded}</p>
+          </article>
+          <article className="admin-card">
+            <h3>Runs held</h3>
+            <p className="stat-value">{diagnostics.runCounts.held}</p>
+          </article>
+          <article className="admin-card">
+            <h3>Jobs pending</h3>
+            <p className="stat-value">{diagnostics.jobCounts.pending}</p>
+          </article>
+          <article className="admin-card">
+            <h3>Outbox pending</h3>
+            <p className="stat-value">{diagnostics.outboxCounts.pending}</p>
+          </article>
+        </div>
+      ) : null}
+
       <div className="admin-grid">
         <article className="admin-card stack">
           <div className="inline-actions">
@@ -299,6 +323,43 @@ export function AutomationOverview({
           )}
         </article>
       </div>
+
+      {diagnostics ? (
+        <article className="admin-card stack">
+          <div className="inline-actions">
+            <h3>Operational diagnostics</h3>
+            <span className="muted">Generated {formatDateTime(diagnostics.generatedAt)}</span>
+          </div>
+          <ul className="admin-list">
+            <li>
+              <strong>Held source snapshots</strong>
+              <span className="muted">{diagnostics.heldSnapshotCount}</span>
+            </li>
+            <li>
+              <strong>Jobs submitted</strong>
+              <span className="muted">{diagnostics.jobCounts.submitted}</span>
+            </li>
+            <li>
+              <strong>Jobs failed</strong>
+              <span className="muted">{diagnostics.jobCounts.failed}</span>
+            </li>
+            <li>
+              <strong>Outbox delivered</strong>
+              <span className="muted">{diagnostics.outboxCounts.delivered}</span>
+            </li>
+          </ul>
+          <div>
+            <h4>Recent hold reasons</h4>
+            <ul className="admin-list">
+              {diagnostics.recentHoldReasons.length > 0 ? (
+                diagnostics.recentHoldReasons.map((reason, index) => <li key={`${reason}-${index}`}>{reason}</li>)
+              ) : (
+                <li className="muted">No recent hold reasons.</li>
+              )}
+            </ul>
+          </div>
+        </article>
+      ) : null}
 
       <article className="admin-card stack">
         <div className="inline-actions">

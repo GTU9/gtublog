@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  fetchAutomationDiagnostics,
   fetchAutomationOutbox,
   fetchAutomationRunDetail,
   fetchAutomationRuns,
@@ -15,6 +16,7 @@ import {
 import { useAdminAuth } from "@/src/admin-auth";
 import { AdminPageHeader, AutomationOverview, LoadingCard, MessageCard } from "@/src/admin-ui";
 import type {
+  AutomationDiagnosticsResponse,
   AutomationOutboxResponse,
   AutomationRunDetailResponse,
   AutomationRunResponse,
@@ -32,6 +34,7 @@ export default function AdminAutomationPage() {
   const [runs, setRuns] = useState<AutomationRunResponse[]>([]);
   const [runDetail, setRunDetail] = useState<AutomationRunDetailResponse | null>(null);
   const [outbox, setOutbox] = useState<AutomationOutboxResponse[]>([]);
+  const [diagnostics, setDiagnostics] = useState<AutomationDiagnosticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [processingOutboxState, setProcessingOutboxState] = useState(false);
@@ -47,14 +50,16 @@ export default function AdminAutomationPage() {
 
     void (async () => {
       try {
-        const [nextTopics, nextRuns, nextOutbox] = await Promise.all([
+        const [nextTopics, nextRuns, nextOutbox, nextDiagnostics] = await Promise.all([
           fetchAutomationTopics(auth.authenticatedFetch),
           fetchAutomationRuns(auth.authenticatedFetch),
           fetchAutomationOutbox(auth.authenticatedFetch),
+          fetchAutomationDiagnostics(auth.authenticatedFetch),
         ]);
         setTopics(nextTopics);
         setRuns(nextRuns);
         setOutbox(nextOutbox);
+        setDiagnostics(nextDiagnostics);
         if (nextRuns[0]) {
           setRunDetail(await fetchAutomationRunDetail(auth.authenticatedFetch, nextRuns[0].id));
         }
@@ -78,12 +83,14 @@ export default function AdminAutomationPage() {
   }, [auth, effectiveTopicId]);
 
   async function refreshRunsAndOutbox(preferredRunId?: number) {
-    const [nextRuns, nextOutbox] = await Promise.all([
+    const [nextRuns, nextOutbox, nextDiagnostics] = await Promise.all([
       fetchAutomationRuns(auth.authenticatedFetch),
       fetchAutomationOutbox(auth.authenticatedFetch),
+      fetchAutomationDiagnostics(auth.authenticatedFetch),
     ]);
     setRuns(nextRuns);
     setOutbox(nextOutbox);
+    setDiagnostics(nextDiagnostics);
     const runId = preferredRunId ?? nextRuns[0]?.id;
     if (runId) {
       setRunDetail(await fetchAutomationRunDetail(auth.authenticatedFetch, runId));
@@ -139,6 +146,7 @@ export default function AdminAutomationPage() {
         <LoadingCard message="Loading automation controls..." />
       ) : (
         <AutomationOverview
+          diagnostics={diagnostics}
           topics={topics}
           selectedTopicId={effectiveTopicId}
           sources={sources}

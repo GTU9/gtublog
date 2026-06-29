@@ -1,5 +1,6 @@
 package com.gtublog.automation;
 
+import com.gtublog.observability.PlatformMetricsService;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -21,16 +22,19 @@ public class PublicationOutboxService {
     private final Clock clock;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final PlatformMetricsService platformMetricsService;
 
     public PublicationOutboxService(
             PublicationOutboxEventRepository publicationOutboxEventRepository,
             AutomationProperties automationProperties,
             Clock clock,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            PlatformMetricsService platformMetricsService) {
         this.publicationOutboxEventRepository = publicationOutboxEventRepository;
         this.automationProperties = automationProperties;
         this.clock = clock;
         this.objectMapper = objectMapper;
+        this.platformMetricsService = platformMetricsService;
         this.httpClient = HttpClient.newHttpClient();
     }
 
@@ -79,6 +83,7 @@ public class PublicationOutboxService {
         var attemptedAt = now();
         if (baseUrl == null || baseUrl.isBlank()) {
             event.markDelivered(attemptedAt);
+            platformMetricsService.recordOutboxDelivery("delivered_without_revalidation");
             return;
         }
 
@@ -91,12 +96,20 @@ public class PublicationOutboxService {
             var response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 200 && response.statusCode() < 300) {
                 event.markDelivered(attemptedAt);
+                platformMetricsService.recordOutboxDelivery("delivered");
             } else {
                 event.markRetry(attemptedAt, attemptedAt.plus(automationProperties.revalidation().retryDelay()));
+                platformMetricsService.recordOutboxDelivery("retry");
             }
         } catch (Exception exception) {
             event.markRetry(attemptedAt, attemptedAt.plus(automationProperties.revalidation().retryDelay()));
+            platformMetricsService.recordOutboxDelivery("retry_exception");
         }
+    }
+
+    @Transactional(readOnly = true)
+    public long countByStatus(String deliveryStatus) {
+        return publicationOutboxEventRepository.countByDeliveryStatus(deliveryStatus);
     }
 
     private AutomationOutboxResponse toResponse(PublicationOutboxEvent event) {
