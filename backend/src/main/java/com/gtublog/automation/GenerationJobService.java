@@ -6,6 +6,8 @@ import com.gtublog.audit.AuditTargetType;
 import com.gtublog.observability.PlatformMetricsService;
 import com.gtublog.source.SourceSnapshot;
 import com.gtublog.source.SourceSnapshotRepository;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
@@ -119,7 +121,9 @@ public class GenerationJobService {
         authorize(workerToken);
         var job = generationJobRepository.findById(jobId).orElseThrow(() -> new NoSuchElementException("Generation job not found."));
         var now = LocalDateTime.now(ZoneOffset.UTC);
-        if (!job.getProviderName().equals(request.providerName()) || !job.getSchemaVersion().equals(request.schemaVersion())) {
+        if (!job.getProviderName().equals(request.providerName())
+                || !job.getPromptVersion().equals(request.promptVersion())
+                || !job.getSchemaVersion().equals(request.schemaVersion())) {
             throw new IllegalArgumentException("The generation job contract does not match this worker submission.");
         }
 
@@ -175,7 +179,9 @@ public class GenerationJobService {
     }
 
     private void authorize(String workerToken) {
-        if (!automationProperties.worker().sharedToken().equals(workerToken)) {
+        if (workerToken == null || !MessageDigest.isEqual(
+                automationProperties.worker().sharedToken().getBytes(StandardCharsets.UTF_8),
+                workerToken.getBytes(StandardCharsets.UTF_8))) {
             throw new org.springframework.security.access.AccessDeniedException("Worker authentication failed.");
         }
     }

@@ -29,22 +29,24 @@ app:
     allowed-origins:
       - ${AUTH_ALLOWED_ORIGIN:http://localhost:3000}
     cookie:
-      secure: ${AUTH_COOKIE_SECURE:false}
+      secure: ${AUTH_COOKIE_SECURE:true}
       domain: ${AUTH_COOKIE_DOMAIN:}
     bootstrap:
       username: ${ADMIN_BOOTSTRAP_USERNAME:admin}
-      password: ${ADMIN_BOOTSTRAP_PASSWORD:change-me}
+      password: ${ADMIN_BOOTSTRAP_PASSWORD:}
       display-name: ${ADMIN_BOOTSTRAP_DISPLAY_NAME:Administrator}
     keys:
       public-key-pem: ${AUTH_PUBLIC_KEY_PEM:}
       private-key-pem: ${AUTH_PRIVATE_KEY_PEM:}
   automation:
+    collection:
+      allowed-private-hosts: ${AUTOMATION_COLLECTION_ALLOWED_PRIVATE_HOSTS:}
     worker:
-      shared-token: ${AUTOMATION_WORKER_SHARED_TOKEN:change-me-worker-token}
+      shared-token: ${AUTOMATION_WORKER_SHARED_TOKEN:}
       lease-duration: ${AUTOMATION_WORKER_LEASE_DURATION:PT5M}
       preferred-provider: ${AUTOMATION_WORKER_PROVIDER:codex-sdk}
       schema-version: ${AUTOMATION_WORKER_SCHEMA_VERSION:automation-job-v1}
     revalidation:
       base-url: ${AUTOMATION_REVALIDATION_BASE_URL:}
-      shared-secret: ${AUTOMATION_REVALIDATION_SHARED_SECRET:change-me-revalidation-secret}
+      shared-secret: ${AUTOMATION_REVALIDATION_SHARED_SECRET:}
       retry-delay: ${AUTOMATION_REVALIDATION_RETRY_DELAY:PT1M}
