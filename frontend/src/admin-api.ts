@@ -5,6 +5,12 @@ import type {
   AdminPostPage,
   AdminPostUpsertRequest,
   AuditPage,
+  AutomationOutboxResponse,
+  AutomationRunDetailResponse,
+  AutomationRunResponse,
+  AutomationScheduleResponse,
+  AutomationSourceResponse,
+  AutomationTopicResponse,
   PostRevisionResponse,
   TaxonomyResponse,
 } from "@/src/admin-types";
@@ -17,6 +23,14 @@ import {
   mockCreatePost,
   mockDeleteCategory,
   mockDeleteTag,
+  mockAutomationOutbox,
+  mockAutomationRunDetail,
+  mockAutomationRuns,
+  mockAutomationSchedules,
+  mockAutomationSources,
+  mockAutomationTopics,
+  mockProcessAutomationOutbox,
+  mockTriggerAutomationRun,
   mockPostRevisions,
   mockRestoreRevision,
   mockSaveCategory,
@@ -270,5 +284,123 @@ export async function fetchAuditEntries(authenticatedFetch: (input: string, init
       return mockAuditEntries();
     }
     throw new Error("Failed to fetch audit entries.");
+  }
+}
+
+export async function fetchAutomationTopics(authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/topics`);
+    return await parseOrThrow<AutomationTopicResponse[]>(response, "Failed to fetch automation topics.");
+  } catch {
+    if (isDevelopmentRuntime()) {
+      return mockAutomationTopics();
+    }
+    throw new Error("Failed to fetch automation topics.");
+  }
+}
+
+export async function fetchAutomationSources(
+  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  topicId: number,
+) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/topics/${topicId}/sources`);
+    return await parseOrThrow<AutomationSourceResponse[]>(response, "Failed to fetch automation sources.");
+  } catch {
+    if (isDevelopmentRuntime()) {
+      return mockAutomationSources(topicId);
+    }
+    throw new Error("Failed to fetch automation sources.");
+  }
+}
+
+export async function fetchAutomationSchedules(
+  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  topicId: number,
+) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/topics/${topicId}/schedules`);
+    return await parseOrThrow<AutomationScheduleResponse[]>(response, "Failed to fetch automation schedules.");
+  } catch {
+    if (isDevelopmentRuntime()) {
+      return mockAutomationSchedules(topicId);
+    }
+    throw new Error("Failed to fetch automation schedules.");
+  }
+}
+
+export async function fetchAutomationRuns(authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/runs`);
+    return await parseOrThrow<AutomationRunResponse[]>(response, "Failed to fetch automation runs.");
+  } catch {
+    if (isDevelopmentRuntime()) {
+      return mockAutomationRuns();
+    }
+    throw new Error("Failed to fetch automation runs.");
+  }
+}
+
+export async function fetchAutomationRunDetail(
+  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  runId: number,
+) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/runs/${runId}`);
+    return await parseOrThrow<AutomationRunDetailResponse>(response, "Failed to fetch automation run detail.");
+  } catch {
+    if (isDevelopmentRuntime()) {
+      return mockAutomationRunDetail(runId);
+    }
+    throw new Error("Failed to fetch automation run detail.");
+  }
+}
+
+export async function triggerAutomationRun(
+  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  topicId: number,
+) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/topics/${topicId}/runs/manual`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    return await parseOrThrow<AutomationRunResponse>(response, "Failed to trigger automation run.");
+  } catch {
+    if (isDevelopmentRuntime()) {
+      return mockTriggerAutomationRun(topicId);
+    }
+    throw new Error("Failed to trigger automation run.");
+  }
+}
+
+export async function fetchAutomationOutbox(authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/outbox`);
+    return await parseOrThrow<AutomationOutboxResponse[]>(response, "Failed to fetch automation outbox.");
+  } catch {
+    if (isDevelopmentRuntime()) {
+      return mockAutomationOutbox();
+    }
+    throw new Error("Failed to fetch automation outbox.");
+  }
+}
+
+export async function processAutomationOutbox(authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/outbox/process`, {
+      method: "POST",
+    });
+    if (!response.ok) {
+      throw new Error("Failed to process automation outbox.");
+    }
+    return;
+  } catch {
+    if (isDevelopmentRuntime()) {
+      mockProcessAutomationOutbox();
+      return;
+    }
+    throw new Error("Failed to process automation outbox.");
   }
 }

@@ -44,6 +44,10 @@ app:
       lease-duration: ${AUTOMATION_WORKER_LEASE_DURATION:PT5M}
       preferred-provider: ${AUTOMATION_WORKER_PROVIDER:codex-sdk}
       schema-version: ${AUTOMATION_WORKER_SCHEMA_VERSION:automation-job-v1}
+    revalidation:
+      base-url: ${AUTOMATION_REVALIDATION_BASE_URL:}
+      shared-secret: ${AUTOMATION_REVALIDATION_SHARED_SECRET:change-me-revalidation-secret}
+      retry-delay: ${AUTOMATION_REVALIDATION_RETRY_DELAY:PT1M}
 
 management:
   endpoints:

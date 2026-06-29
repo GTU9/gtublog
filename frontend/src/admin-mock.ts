@@ -5,6 +5,12 @@ import type {
   AdminProfile,
   AuditPage,
   AuditEntryResponse,
+  AutomationOutboxResponse,
+  AutomationRunDetailResponse,
+  AutomationRunResponse,
+  AutomationScheduleResponse,
+  AutomationSourceResponse,
+  AutomationTopicResponse,
   PostRevisionResponse,
   TaxonomyResponse,
 } from "./admin-types";
@@ -123,6 +129,156 @@ let auditStore: AuditEntryResponse[] = [
 let nextPostId = Math.max(...postsStore.map((post) => post.id), 100) + 1;
 let nextTaxonomyId = Math.max(...categoriesStore.map((item) => item.id), ...tagsStore.map((item) => item.id), 12) + 1;
 let nextAuditId = Math.max(...auditStore.map((entry) => entry.id), 9000) + 1;
+const automationTopicsStore: AutomationTopicResponse[] = [
+  {
+    id: 1,
+    slug: "ai-daily-briefing",
+    name: "AI Daily Briefing",
+    promptTemplateVersion: "v1",
+    publicationEnabled: true,
+    createdAt: "2026-06-28T08:00:00Z",
+    updatedAt: "2026-06-29T08:10:00Z",
+  },
+];
+const automationSourcesStore: AutomationSourceResponse[] = [
+  {
+    id: 101,
+    topicId: 1,
+    sourceType: "RSS",
+    sourceUrl: "https://example.com/feed.xml",
+    enabled: true,
+    createdAt: "2026-06-28T08:05:00Z",
+    updatedAt: "2026-06-28T08:05:00Z",
+  },
+  {
+    id: 102,
+    topicId: 1,
+    sourceType: "WEB",
+    sourceUrl: "https://news.example.org/ai",
+    enabled: true,
+    createdAt: "2026-06-28T08:06:00Z",
+    updatedAt: "2026-06-28T08:06:00Z",
+  },
+];
+const automationSchedulesStore: AutomationScheduleResponse[] = [
+  {
+    id: 201,
+    topicId: 1,
+    name: "Morning run",
+    cronExpression: "0 0 9 * * *",
+    timezone: "Asia/Seoul",
+    status: "ACTIVE",
+    misfirePolicy: "FIRE_ONCE_NOW",
+    nextPlannedRunAt: "2026-06-30T00:00:00Z",
+    createdAt: "2026-06-28T08:07:00Z",
+    updatedAt: "2026-06-29T08:10:00Z",
+  },
+];
+let automationRunsStore: AutomationRunResponse[] = [
+  {
+    id: 301,
+    runKey: "run-301",
+    topicId: 1,
+    scheduleId: 201,
+    triggerType: "SCHEDULED",
+    status: "SUCCEEDED",
+    idempotencyKey: "schedule:201:2026-06-29T00:00:00Z",
+    holdReason: null,
+    snapshotCount: 2,
+    startedAt: "2026-06-29T00:00:00Z",
+    completedAt: "2026-06-29T00:00:11Z",
+    createdAt: "2026-06-29T00:00:00Z",
+    updatedAt: "2026-06-29T00:00:11Z",
+  },
+  {
+    id: 302,
+    runKey: "run-302",
+    topicId: 1,
+    scheduleId: null,
+    triggerType: "MANUAL",
+    status: "HELD",
+    idempotencyKey: "manual:1:held",
+    holdReason: "Distinct origin corroboration requires at least two allowed sources.",
+    snapshotCount: 1,
+    startedAt: "2026-06-29T04:00:00Z",
+    completedAt: "2026-06-29T04:00:05Z",
+    createdAt: "2026-06-29T04:00:00Z",
+    updatedAt: "2026-06-29T04:00:05Z",
+  },
+];
+const automationRunDetailsStore = new Map<number, AutomationRunDetailResponse>([
+  [
+    301,
+    {
+      run: automationRunsStore[0],
+      snapshots: [
+        {
+          id: 5001,
+          sourceUrl: "https://example.com/feed.xml",
+          canonicalUrl: "https://example.com/posts/ai-update",
+          originHost: "example.com",
+          title: "AI update from source one",
+          httpStatus: 200,
+          policyResult: "ALLOWED",
+          contentHash: "hash-1",
+          retrievedAt: "2026-06-29T00:00:02Z",
+        },
+        {
+          id: 5002,
+          sourceUrl: "https://news.example.org/ai",
+          canonicalUrl: "https://news.example.org/posts/ai-update",
+          originHost: "news.example.org",
+          title: "AI update from source two",
+          httpStatus: 200,
+          policyResult: "ALLOWED",
+          contentHash: "hash-2",
+          retrievedAt: "2026-06-29T00:00:03Z",
+        },
+      ],
+    },
+  ],
+  [
+    302,
+    {
+      run: automationRunsStore[1],
+      snapshots: [
+        {
+          id: 5003,
+          sourceUrl: "https://example.com/feed.xml",
+          canonicalUrl: "https://example.com/posts/duplicate-ai-update",
+          originHost: "example.com",
+          title: "Single-source duplicate candidate",
+          httpStatus: 200,
+          policyResult: "ALLOWED",
+          contentHash: "hash-3",
+          retrievedAt: "2026-06-29T04:00:01Z",
+        },
+      ],
+    },
+  ],
+]);
+let automationOutboxStore: AutomationOutboxResponse[] = [
+  {
+    id: 401,
+    aggregateId: 101,
+    deliveryStatus: "DELIVERED",
+    payloadJson: "{\"postId\":101,\"slug\":\"spring-boot-automation-blog\"}",
+    availableAt: "2026-06-29T00:00:11Z",
+    processedAt: "2026-06-29T00:00:12Z",
+    lastAttemptAt: "2026-06-29T00:00:12Z",
+    createdAt: "2026-06-29T00:00:11Z",
+  },
+  {
+    id: 402,
+    aggregateId: 102,
+    deliveryStatus: "PENDING",
+    payloadJson: "{\"postId\":102,\"slug\":\"ai-daily-briefing-2\"}",
+    availableAt: "2026-06-29T08:20:00Z",
+    processedAt: null,
+    lastAttemptAt: "2026-06-29T08:15:00Z",
+    createdAt: "2026-06-29T08:10:00Z",
+  },
+];
 
 function summarize(post: AdminPostDetail) {
   return {
@@ -198,6 +354,100 @@ export function resetAdminMockState() {
   nextPostId = Math.max(...postsStore.map((post) => post.id), 100) + 1;
   nextTaxonomyId = Math.max(...categoriesStore.map((item) => item.id), ...tagsStore.map((item) => item.id), 12) + 1;
   nextAuditId = Math.max(...auditStore.map((entry) => entry.id), 9000) + 1;
+}
+
+export function mockAutomationTopics() {
+  return automationTopicsStore.map((item) => ({ ...item }));
+}
+
+export function mockAutomationSources(topicId: number) {
+  return automationSourcesStore.filter((item) => item.topicId === topicId).map((item) => ({ ...item }));
+}
+
+export function mockAutomationSchedules(topicId: number) {
+  return automationSchedulesStore.filter((item) => item.topicId === topicId).map((item) => ({ ...item }));
+}
+
+export function mockAutomationRuns() {
+  return automationRunsStore.map((item) => ({ ...item }));
+}
+
+export function mockAutomationRunDetail(runId: number) {
+  const detail = automationRunDetailsStore.get(runId);
+  return detail
+    ? {
+        run: { ...detail.run },
+        snapshots: detail.snapshots.map((item) => ({ ...item })),
+      }
+    : null;
+}
+
+export function mockTriggerAutomationRun(topicId: number) {
+  const now = new Date().toISOString();
+  const run: AutomationRunResponse = {
+    id: Math.max(...automationRunsStore.map((item) => item.id), 300) + 1,
+    runKey: `run-${Date.now()}`,
+    topicId,
+    scheduleId: null,
+    triggerType: "MANUAL",
+    status: "SUCCEEDED",
+    idempotencyKey: `manual:${topicId}:${Date.now()}`,
+    holdReason: null,
+    snapshotCount: 2,
+    startedAt: now,
+    completedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+  automationRunsStore = [run, ...automationRunsStore];
+  automationRunDetailsStore.set(run.id, {
+    run,
+    snapshots: [
+      {
+        id: Date.now(),
+        sourceUrl: "https://example.com/feed.xml",
+        canonicalUrl: "https://example.com/posts/latest",
+        originHost: "example.com",
+        title: "Manual automation source",
+        httpStatus: 200,
+        policyResult: "ALLOWED",
+        contentHash: "hash-latest-1",
+        retrievedAt: now,
+      },
+      {
+        id: Date.now() + 1,
+        sourceUrl: "https://news.example.org/ai",
+        canonicalUrl: "https://news.example.org/posts/latest",
+        originHost: "news.example.org",
+        title: "Manual corroborating source",
+        httpStatus: 200,
+        policyResult: "ALLOWED",
+        contentHash: "hash-latest-2",
+        retrievedAt: now,
+      },
+    ],
+  });
+  recordAudit("AUTOMATION", String(run.id), "AUTOMATION_RUN_STARTED", { topicId, triggerType: "MANUAL" });
+  return { ...run };
+}
+
+export function mockAutomationOutbox() {
+  return automationOutboxStore.map((item) => ({ ...item }));
+}
+
+export function mockProcessAutomationOutbox() {
+  const now = new Date().toISOString();
+  automationOutboxStore = automationOutboxStore.map((item) =>
+    item.deliveryStatus === "PENDING"
+      ? {
+          ...item,
+          deliveryStatus: "DELIVERED",
+          processedAt: now,
+          lastAttemptAt: now,
+        }
+      : item,
+  );
+  recordAudit("AUTOMATION", "outbox", "AUTOMATION_OUTBOX_REPLAYED", {});
 }
 
 export function mockAdminPosts(): AdminPostPage {

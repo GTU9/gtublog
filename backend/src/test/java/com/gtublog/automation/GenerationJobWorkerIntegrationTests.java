@@ -3,6 +3,7 @@ package com.gtublog.automation;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -28,8 +29,6 @@ import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-
-import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 
 @Tag("docker")
 @SpringBootTest
@@ -100,6 +99,10 @@ class GenerationJobWorkerIntegrationTests {
     void resetState() {
         automationScheduleSynchronizer.clearAutomationSchedules();
         WIREMOCK.resetAll();
+        jdbcTemplate.update("DELETE FROM post_revision_source_snapshot");
+        jdbcTemplate.update("DELETE FROM publication_outbox_event");
+        jdbcTemplate.update("DELETE FROM post_revision");
+        jdbcTemplate.update("DELETE FROM post");
         jdbcTemplate.update("DELETE FROM source_snapshot");
         jdbcTemplate.update("DELETE FROM generation_job");
         jdbcTemplate.update("DELETE FROM automation_run");
@@ -144,7 +147,9 @@ class GenerationJobWorkerIntegrationTests {
         var claimJson = jsonBody(claimResult);
         assertThat(claimJson.get("jobId").asLong()).isEqualTo(job.getId());
         assertThat(claimJson.get("providerName").asText()).isEqualTo("fake-provider");
-        assertThat(claimJson.get("snapshots")).hasSize(1);
+        assertThat(claimJson.get("snapshots")).hasSize(2);
+        long firstSnapshotId = claimJson.at("/snapshots/0/snapshotId").asLong();
+        long secondSnapshotId = claimJson.at("/snapshots/1/snapshotId").asLong();
 
         mockMvc.perform(post("/api/v1/internal/generation-jobs/{jobId}/heartbeat", job.getId())
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
@@ -169,16 +174,65 @@ class GenerationJobWorkerIntegrationTests {
                                     "title":"자동 초안",
                                     "excerpt":"요약",
                                     "contentMarkdown":"# 자동 초안\\n\\n본문",
-                                    "citationSnapshotIds":[1]
+                                    "citationSnapshotIds":[%d,%d]
                                   }
                                 }
-                                """))
+                                """.formatted(firstSnapshotId, secondSnapshotId)))
                 .andExpect(status().isAccepted());
 
         var storedJob = generationJobRepository.findById(job.getId()).orElseThrow();
         assertThat(storedJob.getJobStatus()).isEqualTo(GenerationJobStatus.SUBMITTED);
         assertThat(storedJob.getResultPayloadJson()).contains("자동 초안");
         assertThat(storedJob.getSubmittedAt()).isNotNull();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post_revision", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post_revision_source_snapshot", Integer.class)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM automation_run WHERE id = ?", String.class, job.getRunId())).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    void holdsPublicationWhenOnlyOneIndependentSourceIsProvided() throws Exception {
+        var job = seedSingleSourceGenerationJob();
+
+        var claimResult = mockMvc.perform(post("/api/v1/internal/generation-jobs/claim")
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "workerId":"worker-a",
+                                  "supportedProviders":["fake-provider"],
+                                  "supportedSchemaVersions":["automation-job-v1"]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        long snapshotId = jsonBody(claimResult).at("/snapshots/0/snapshotId").asLong();
+
+        mockMvc.perform(post("/api/v1/internal/generation-jobs/{jobId}/submit", job.getId())
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "workerId":"worker-a",
+                                  "providerName":"fake-provider",
+                                  "promptVersion":"prompt-v1",
+                                  "schemaVersion":"automation-job-v1",
+                                  "draft":{
+                                    "title":"단일 출처 초안",
+                                    "excerpt":"요약",
+                                    "contentMarkdown":"# 단일 출처 초안\\n\\n본문",
+                                    "citationSnapshotIds":[%d]
+                                  }
+                                }
+                                """.formatted(snapshotId)))
+                .andExpect(status().isAccepted());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM automation_run WHERE id = ?", String.class, job.getRunId())).isEqualTo("HELD");
+        assertThat(jdbcTemplate.queryForObject("SELECT hold_reason FROM automation_run WHERE id = ?", String.class, job.getRunId()))
+                .contains("corroboration");
     }
 
     @Test
@@ -246,7 +300,8 @@ class GenerationJobWorkerIntegrationTests {
     }
 
     private GenerationJob seedGenerationJob() {
-        stubAccessibleSource("/worker-feed");
+        stubAccessibleSource("/worker-feed", "https://example.com/worker-feed");
+        stubAccessibleSource("/worker-feed-2", "https://example.org/worker-feed-2");
         var topic = automationAdminService.createTopic(new AutomationTopicRequest(
                 null,
                 "Automation Worker",
@@ -256,7 +311,26 @@ class GenerationJobWorkerIntegrationTests {
                 AutomationSourceType.HTML,
                 WIREMOCK.baseUrl() + "/worker-feed",
                 true));
+        automationAdminService.createSource(topic.id(), new AutomationSourceRequest(
+                AutomationSourceType.HTML,
+                WIREMOCK.baseUrl() + "/worker-feed-2",
+                true));
         var run = automationAdminService.triggerManualRun(topic.id(), "story-8-run");
+        return generationJobRepository.findByRunId(run.id()).orElseThrow();
+    }
+
+    private GenerationJob seedSingleSourceGenerationJob() {
+        stubAccessibleSource("/worker-feed", "https://example.com/worker-feed");
+        var topic = automationAdminService.createTopic(new AutomationTopicRequest(
+                null,
+                "Single Source Worker",
+                "prompt-v1",
+                true));
+        automationAdminService.createSource(topic.id(), new AutomationSourceRequest(
+                AutomationSourceType.HTML,
+                WIREMOCK.baseUrl() + "/worker-feed",
+                true));
+        var run = automationAdminService.triggerManualRun(topic.id(), "story-9-held-run");
         return generationJobRepository.findByRunId(run.id()).orElseThrow();
     }
 
@@ -264,7 +338,7 @@ class GenerationJobWorkerIntegrationTests {
         return "worker-test-token";
     }
 
-    private void stubAccessibleSource(String path) {
+    private void stubAccessibleSource(String path, String canonicalUrl) {
         WIREMOCK.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get(urlEqualTo(path))
                 .willReturn(aResponse()
                         .withStatus(200)
@@ -273,13 +347,13 @@ class GenerationJobWorkerIntegrationTests {
                                 <html>
                                   <head>
                                     <title>Worker source</title>
-                                    <link rel="canonical" href="https://example.com%s" />
+                                    <link rel="canonical" href="%s" />
                                   </head>
                                   <body>
                                     <p>Verified worker content excerpt.</p>
                                   </body>
                                 </html>
-                                """.formatted(path))));
+                                """.formatted(canonicalUrl))));
     }
 
     private JsonNode jsonBody(MvcResult result) throws Exception {

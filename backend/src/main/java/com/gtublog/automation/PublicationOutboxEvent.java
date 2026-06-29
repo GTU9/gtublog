@@ -42,4 +42,78 @@ public class PublicationOutboxEvent extends BaseEntity {
 
     protected PublicationOutboxEvent() {
     }
+
+    private PublicationOutboxEvent(
+            String eventKey,
+            String aggregateType,
+            Long aggregateId,
+            String eventType,
+            String deliveryStatus,
+            String payloadJson,
+            LocalDateTime availableAt) {
+        this.eventKey = eventKey;
+        this.aggregateType = aggregateType;
+        this.aggregateId = aggregateId;
+        this.eventType = eventType;
+        this.deliveryStatus = deliveryStatus;
+        this.payloadJson = payloadJson;
+        this.availableAt = availableAt;
+    }
+
+    public static PublicationOutboxEvent pending(
+            String eventKey,
+            String aggregateType,
+            Long aggregateId,
+            String eventType,
+            String payloadJson,
+            LocalDateTime availableAt) {
+        return new PublicationOutboxEvent(
+                eventKey,
+                aggregateType,
+                aggregateId,
+                eventType,
+                "PENDING",
+                payloadJson,
+                availableAt);
+    }
+
+    public Long getId() {
+        return super.getId();
+    }
+
+    public Long getAggregateId() {
+        return aggregateId;
+    }
+
+    public String getDeliveryStatus() {
+        return deliveryStatus;
+    }
+
+    public String getPayloadJson() {
+        return payloadJson;
+    }
+
+    public LocalDateTime getAvailableAt() {
+        return availableAt;
+    }
+
+    public LocalDateTime getProcessedAt() {
+        return processedAt;
+    }
+
+    public LocalDateTime getLastAttemptAt() {
+        return lastAttemptAt;
+    }
+
+    public void markDelivered(LocalDateTime processedAt) {
+        this.deliveryStatus = "DELIVERED";
+        this.processedAt = processedAt;
+        this.lastAttemptAt = processedAt;
+    }
+
+    public void markRetry(LocalDateTime attemptedAt, LocalDateTime nextAvailableAt) {
+        this.deliveryStatus = "PENDING";
+        this.lastAttemptAt = attemptedAt;
+        this.availableAt = nextAvailableAt;
+    }
 }
