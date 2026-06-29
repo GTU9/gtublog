@@ -15,6 +15,7 @@
 *.key
 
 # Java / Gradle
+.tools/
 .gradle/
 **/build/
 out/
@@ -22,6 +23,7 @@ out/
 # Node / Next.js / Playwright
 node_modules/
 .next/
+**/dist/
 coverage/
 playwright-report/
 test-results/
