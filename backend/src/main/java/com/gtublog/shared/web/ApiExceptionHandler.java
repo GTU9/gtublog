@@ -2,8 +2,11 @@ package com.gtublog.shared.web;
 
 import java.net.URI;
 import java.util.NoSuchElementException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -12,20 +15,40 @@ class ApiExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
     ProblemDetail handleBadRequest(IllegalArgumentException exception) {
-        return problemDetail(HttpStatus.BAD_REQUEST, "잘못된 요청입니다.", exception.getMessage());
+        return problemDetail(HttpStatus.BAD_REQUEST, "Bad request", exception.getMessage());
+    }
+
+    @ExceptionHandler(BadCredentialsException.class)
+    ProblemDetail handleBadCredentials(BadCredentialsException exception) {
+        return problemDetail(HttpStatus.UNAUTHORIZED, "Authentication failed", "Invalid credentials.");
+    }
+
+    @ExceptionHandler(com.gtublog.auth.RateLimitExceededException.class)
+    ProblemDetail handleRateLimit(com.gtublog.auth.RateLimitExceededException exception) {
+        return problemDetail(HttpStatus.TOO_MANY_REQUESTS, "Too many requests", exception.getMessage());
+    }
+
+    @ExceptionHandler(AccessDeniedException.class)
+    ProblemDetail handleAccessDenied(AccessDeniedException exception) {
+        return problemDetail(HttpStatus.FORBIDDEN, "Access denied", "You do not have permission to access this resource.");
     }
 
     @ExceptionHandler(NoSuchElementException.class)
     ProblemDetail handleNotFound(NoSuchElementException exception) {
-        return problemDetail(HttpStatus.NOT_FOUND, "리소스를 찾을 수 없습니다.", exception.getMessage());
+        return problemDetail(HttpStatus.NOT_FOUND, "Resource not found", exception.getMessage());
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    ProblemDetail handleConflict(DataIntegrityViolationException exception) {
+        return problemDetail(HttpStatus.CONFLICT, "Conflict", "The request conflicts with current data state.");
     }
 
     @ExceptionHandler(Exception.class)
     ProblemDetail handleUnexpected(Exception exception) {
         return problemDetail(
                 HttpStatus.INTERNAL_SERVER_ERROR,
-                "예상하지 못한 오류가 발생했습니다.",
-                "요청을 처리하지 못했습니다.");
+                "Unexpected error",
+                "The server could not process the request.");
     }
 
     private ProblemDetail problemDetail(HttpStatus status, String title, String detail) {

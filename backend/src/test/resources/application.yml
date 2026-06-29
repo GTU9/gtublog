@@ -1,0 +1,55 @@
+app:
+  auth:
+    issuer: https://gtublog.test
+    audience: gtublog-admin-test
+    access-token-ttl: PT10M
+    refresh-token-ttl: P14D
+    allowed-origins:
+      - http://localhost:3000
+    cookie:
+      secure: false
+      domain: ""
+    bootstrap:
+      username: admin
+      password: admin-test-password
+      display-name: Test Administrator
+    keys:
+      public-key-pem: |
+        -----BEGIN PUBLIC KEY-----
+        MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAzbflXJ7QDj7sfxNJ5B7v
+        sajQ1hju4FOpaJEM7EA81u6kN/VIaEwzKaFQz1DLIVePFtw3Vfo6kY+y0IB1W14V
+        4EBBvoqcgo4+gHtkf+H9GD5lRH5XM/Gct/gIUiev4iuK6BjXkLod1SwcMGsD/+z6
+        sRwbWJvSVJT7vW3KI06ZSLIzL+MDe+gnJebZYzdUrRycJ3Rkly/YaZq4z9VXpdKR
+        wDVaegohUYBqp5RymZO+/voRlbyUhaqlmu4EXjBSQlxdjjUXqx0FvIumz/BiHhUq
+        AXVO6Lg8tzj+UCcsbWJValxJVAQvnjHzwq3KBt+M7xQ57E0hvoWriE3Am6BF7z2U
+        FwIDAQAB
+        -----END PUBLIC KEY-----
+      private-key-pem: |
+        -----BEGIN PRIVATE KEY-----
+        MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDNt+VcntAOPux/
+        E0nkHu+xqNDWGO7gU6lokQzsQDzW7qQ39UhoTDMpoVDPUMshV48W3DdV+jqRj7LQ
+        gHVbXhXgQEG+ipyCjj6Ae2R/4f0YPmVEflcz8Zy3+AhSJ6/iK4roGNeQuh3VLBww
+        awP/7PqxHBtYm9JUlPu9bcojTplIsjMv4wN76Ccl5tljN1StHJwndGSXL9hpmrjP
+        1Vel0pHANVp6CiFRgGqnlHKZk77++hGVvJSFqqWa7gReMFJCXF2ONRerHQW8i6bP
+        8GIeFSoBdU7ouDy3OP5QJyxtYlVqXElUBC+eMfPCrcoG34zvFDnsTSG+hauITcCb
+        oEXvPZQXAgMBAAECggEASomxP2gDtsWx5zFT+qYC73pdgNWz5/AoV80Gw6ta3/3D
+        3sqvG6tQdmsO3q9FiqUxIXVVT3/FLOzGO6nv29UxU/m0WJfcsalcmC0dcwCtNdWV
+        18V3T0jiIf5q9WmP3wEr6YDmynfFS3IaHKkJ3/c7tmSau/ZptV/t/usC7NwTyjSw
+        FaRAx48LCLdEVS9k7o3GwYa8SKIKFUoKOQPMokVMNaj5dumC5QdCFHV7WZ/gOFIF
+        oLtgHDXBL99VFOLGCGVG+N2voBD4ZQoy0Es5i4OJvS/NbpL21C/bdcimMS8ywQXr
+        w+qzgcHho4KSpoddt6hVGGAxBjj4u2tBXD8bKp4mcQKBgQD90gocJB6UA3YUiUiu
+        y3TACuV9RXediftSi8M6titfzyeaf56CCCtQQHw+qQXpjgjAUX3qDLafdfbi4q2I
+        Ik+WyR+bzuh79LJ/0yt3c3bamickE7wqoKX/zU1PIu72vw/SZpUQ1Q/LhjaMf+qN
+        FQDYUup1EldiPml/A7oaSAOvnQKBgQDPfB2ztID+BIKGO1QdgWA34oqoc96fkrYb
+        6Q8vODVYVRYgDr4N05rXvM5r4UDycHc3D6q+qJWGvcmwvCHh1IyDhJYX0T7ceBBw
+        CFNln7fY2bc63qPTZXtjW7c3HjEBC+4f15vYVtelpQPtdRUUj7sks6ezDOJhIahv
+        p3YkphG2QwKBgEJnw1FdecqLpUb2K9ffTuo3b5b4p7TFtsT/39HqeyqTze6z2Mp4
+        TKywUlEqc2uJR2zZZTHopZbOjAsL9w6Yu23drLFczqIvgMvEeajEwqGqlvbvWtlk
+        Mkncco9zukU/82m+gN1ogLtkn7zecoT6q7/s4X5DkC0Z2wvp87SQhrZZAoGBAKHD
+        O4j6xsLEk1rB8J+cWX7YkZAp3jx87pwuBRekc/qtQ7W0qLow6v0eB7WWBcO+qUN1
+        ZIKG/yTw3Ml8s9HUm8SB318sVR0gQniGFTca4gQgIbm1EPbknOFnBR3k3QHa4klT
+        GP7/HdvYHorIiKniMV647psrBWgDDMYYQoTqMM7vAoGBAMKR3OYz4EapPyJv8AFP
+        DCEJqJKhC8N3vgMP7N3XjAVjnjsa4Ev32KO4ghyVsOjXwGNc6BwYhXQ71Rshre4B
+        7V+HUq9LrCYVc3213UX31dqKOzV/7otN8drWmQfWnwGw3fPSHmiLVBz9RwubndWB
+        BhD9TPSydm4Sn09lJ45sfMDD
+        -----END PRIVATE KEY-----

@@ -30,4 +30,43 @@ public class AdminUser extends BaseEntity {
 
     protected AdminUser() {
     }
+
+    private AdminUser(String username, String passwordHash, String displayName, AdminUserStatus status) {
+        this.username = username;
+        this.passwordHash = passwordHash;
+        this.displayName = displayName;
+        this.status = status;
+    }
+
+    public static AdminUser bootstrap(String username, String passwordHash, String displayName) {
+        return new AdminUser(username, passwordHash, displayName, AdminUserStatus.ACTIVE);
+    }
+
+    public String getUsername() {
+        return username;
+    }
+
+    public String getPasswordHash() {
+        return passwordHash;
+    }
+
+    public String getDisplayName() {
+        return displayName;
+    }
+
+    public AdminUserStatus getStatus() {
+        return status;
+    }
+
+    public LocalDateTime getLastLoginAt() {
+        return lastLoginAt;
+    }
+
+    public boolean isActive() {
+        return status == AdminUserStatus.ACTIVE;
+    }
+
+    public void markLoggedIn(LocalDateTime loggedInAt) {
+        this.lastLoginAt = loggedInAt;
+    }
 }
