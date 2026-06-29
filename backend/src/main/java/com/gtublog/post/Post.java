@@ -49,4 +49,112 @@ public class Post extends BaseEntity {
 
     protected Post() {
     }
+
+    private Post(
+            String slug,
+            String title,
+            String excerpt,
+            String contentMarkdown,
+            String contentHtml,
+            String sourceFingerprint) {
+        this.slug = slug;
+        this.title = title;
+        this.excerpt = excerpt;
+        this.contentMarkdown = contentMarkdown;
+        this.contentHtml = contentHtml;
+        this.sourceFingerprint = sourceFingerprint;
+        this.status = PostStatus.DRAFT;
+    }
+
+    public static Post draft(
+            String slug,
+            String title,
+            String excerpt,
+            String contentMarkdown,
+            String contentHtml,
+            String sourceFingerprint) {
+        return new Post(slug, title, excerpt, contentMarkdown, contentHtml, sourceFingerprint);
+    }
+
+    public Long getId() {
+        return super.getId();
+    }
+
+    public String getSlug() {
+        return slug;
+    }
+
+    public String getTitle() {
+        return title;
+    }
+
+    public String getExcerpt() {
+        return excerpt;
+    }
+
+    public String getContentMarkdown() {
+        return contentMarkdown;
+    }
+
+    public String getContentHtml() {
+        return contentHtml;
+    }
+
+    public PostStatus getStatus() {
+        return status;
+    }
+
+    public String getSourceFingerprint() {
+        return sourceFingerprint;
+    }
+
+    public LocalDateTime getFirstPublishedAt() {
+        return firstPublishedAt;
+    }
+
+    public LocalDateTime getArchivedAt() {
+        return archivedAt;
+    }
+
+    public LocalDateTime getDeletedAt() {
+        return deletedAt;
+    }
+
+    public boolean isPublished() {
+        return status == PostStatus.PUBLISHED && deletedAt == null;
+    }
+
+    public void revise(String slug, String title, String excerpt, String contentMarkdown, String contentHtml) {
+        this.slug = slug;
+        this.title = title;
+        this.excerpt = excerpt;
+        this.contentMarkdown = contentMarkdown;
+        this.contentHtml = contentHtml;
+    }
+
+    public void publish(LocalDateTime publishedAt) {
+        this.status = PostStatus.PUBLISHED;
+        if (this.firstPublishedAt == null) {
+            this.firstPublishedAt = publishedAt;
+        }
+        this.archivedAt = null;
+        this.deletedAt = null;
+    }
+
+    public void archive(LocalDateTime archivedAt) {
+        this.status = PostStatus.ARCHIVED;
+        this.archivedAt = archivedAt;
+        this.deletedAt = null;
+    }
+
+    public void markDeleted(LocalDateTime deletedAt) {
+        this.status = PostStatus.DELETED;
+        this.deletedAt = deletedAt;
+    }
+
+    public void restoreToDraft() {
+        this.status = PostStatus.DRAFT;
+        this.archivedAt = null;
+        this.deletedAt = null;
+    }
 }

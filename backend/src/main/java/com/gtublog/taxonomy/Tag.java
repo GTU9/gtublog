@@ -20,4 +20,36 @@ public class Tag extends BaseEntity {
 
     protected Tag() {
     }
+
+    private Tag(String slug, String name, String description) {
+        this.slug = slug;
+        this.name = name;
+        this.description = description;
+    }
+
+    public static Tag create(String slug, String name, String description) {
+        return new Tag(slug, name, description);
+    }
+
+    public Long getId() {
+        return super.getId();
+    }
+
+    public String getSlug() {
+        return slug;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void update(String slug, String name, String description) {
+        this.slug = slug;
+        this.name = name;
+        this.description = description;
+    }
 }

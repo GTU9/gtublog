@@ -21,4 +21,30 @@ public class PostViewCounter extends BaseEntity {
 
     protected PostViewCounter() {
     }
+
+    private PostViewCounter(Long postId) {
+        this.postId = postId;
+        this.viewCount = 0L;
+    }
+
+    public static PostViewCounter initialize(Long postId) {
+        return new PostViewCounter(postId);
+    }
+
+    public Long getPostId() {
+        return postId;
+    }
+
+    public Long getViewCount() {
+        return viewCount;
+    }
+
+    public LocalDateTime getLastViewedAt() {
+        return lastViewedAt;
+    }
+
+    public void increment(LocalDateTime viewedAt) {
+        this.viewCount = this.viewCount + 1;
+        this.lastViewedAt = viewedAt;
+    }
 }
