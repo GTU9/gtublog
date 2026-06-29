@@ -50,6 +50,7 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: "24"
+          package-manager-cache: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -95,6 +96,7 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: "24"
+          package-manager-cache: false
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
