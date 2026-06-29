@@ -12,5 +12,7 @@ public record PostSummaryResponse(
         LocalDateTime firstPublishedAt,
         long viewCount,
         List<String> categories,
-        List<String> tags) {
+        List<String> tags,
+        List<TaxonomyItemResponse> categoryDetails,
+        List<TaxonomyItemResponse> tagDetails) {
 }

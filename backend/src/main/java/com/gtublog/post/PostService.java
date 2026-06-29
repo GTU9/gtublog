@@ -280,16 +280,46 @@ public class PostService {
     private PostSummaryResponse toSummary(Post post) {
         var categories = postRepository.findById(post.getId()).map(ignore -> postQueryRepository.categoryIdsForPost(post.getId())).orElse(List.of());
         var tags = postRepository.findById(post.getId()).map(ignore -> postQueryRepository.tagIdsForPost(post.getId())).orElse(List.of());
-        var categoryNames = categoryRepository.findAllById(categories).stream().map(category -> category.getName()).toList();
-        var tagNames = tagRepository.findAllById(tags).stream().map(tag -> tag.getName()).toList();
+        var categoryDetails = categoryRepository.findAllById(categories).stream()
+                .map(category -> new TaxonomyItemResponse(category.getId(), category.getSlug(), category.getName(), category.getDescription()))
+                .toList();
+        var tagDetails = tagRepository.findAllById(tags).stream()
+                .map(tag -> new TaxonomyItemResponse(tag.getId(), tag.getSlug(), tag.getName(), tag.getDescription()))
+                .toList();
         var viewCount = postViewCounterRepository.findByPostId(post.getId()).map(counter -> counter.getViewCount()).orElse(0L);
-        return new PostSummaryResponse(post.getId(), post.getSlug(), post.getTitle(), post.getExcerpt(), post.getStatus(), post.getFirstPublishedAt(), viewCount, categoryNames, tagNames);
+        return new PostSummaryResponse(
+                post.getId(),
+                post.getSlug(),
+                post.getTitle(),
+                post.getExcerpt(),
+                post.getStatus(),
+                post.getFirstPublishedAt(),
+                viewCount,
+                categoryDetails.stream().map(TaxonomyItemResponse::name).toList(),
+                tagDetails.stream().map(TaxonomyItemResponse::name).toList(),
+                categoryDetails,
+                tagDetails);
     }
 
     private PostSummaryResponse toSummary(PostQueryRepository.PostSummaryProjection projection) {
-        var categoryNames = categoryRepository.findAllById(postQueryRepository.categoryIdsForPost(projection.id())).stream().map(category -> category.getName()).toList();
-        var tagNames = tagRepository.findAllById(postQueryRepository.tagIdsForPost(projection.id())).stream().map(tag -> tag.getName()).toList();
-        return new PostSummaryResponse(projection.id(), projection.slug(), projection.title(), projection.excerpt(), projection.status(), projection.firstPublishedAt(), projection.viewCount(), categoryNames, tagNames);
+        var categoryDetails = categoryRepository.findAllById(postQueryRepository.categoryIdsForPost(projection.id())).stream()
+                .map(category -> new TaxonomyItemResponse(category.getId(), category.getSlug(), category.getName(), category.getDescription()))
+                .toList();
+        var tagDetails = tagRepository.findAllById(postQueryRepository.tagIdsForPost(projection.id())).stream()
+                .map(tag -> new TaxonomyItemResponse(tag.getId(), tag.getSlug(), tag.getName(), tag.getDescription()))
+                .toList();
+        return new PostSummaryResponse(
+                projection.id(),
+                projection.slug(),
+                projection.title(),
+                projection.excerpt(),
+                projection.status(),
+                projection.firstPublishedAt(),
+                projection.viewCount(),
+                categoryDetails.stream().map(TaxonomyItemResponse::name).toList(),
+                tagDetails.stream().map(TaxonomyItemResponse::name).toList(),
+                categoryDetails,
+                tagDetails);
     }
 
     private PostPageResponse<PostSummaryResponse> summarizePage(
