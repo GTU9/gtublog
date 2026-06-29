@@ -20,4 +20,36 @@ public class Category extends BaseEntity {
 
     protected Category() {
     }
+
+    private Category(String slug, String name, String description) {
+        this.slug = slug;
+        this.name = name;
+        this.description = description;
+    }
+
+    public static Category create(String slug, String name, String description) {
+        return new Category(slug, name, description);
+    }
+
+    public Long getId() {
+        return super.getId();
+    }
+
+    public String getSlug() {
+        return slug;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public void update(String slug, String name, String description) {
+        this.slug = slug;
+        this.name = name;
+        this.description = description;
+    }
 }
