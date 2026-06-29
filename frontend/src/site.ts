@@ -7,6 +7,9 @@ export const siteUrl = (process.env.GTUBLOG_SITE_URL ?? "https://gtublog.dev").r
 export const publicApiBaseUrl = (
   process.env.GTUBLOG_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080/api/v1/public"
 ).replace(/\/+$/, "");
+export const applicationApiBaseUrl = (
+  process.env.GTUBLOG_APPLICATION_API_BASE_URL ?? "http://127.0.0.1:8080/api/v1"
+).replace(/\/+$/, "");
 
 export const defaultRevalidateSeconds = 300;
 
