@@ -36,4 +36,83 @@ public class AutomationSchedule extends BaseEntity {
 
     protected AutomationSchedule() {
     }
+
+    private AutomationSchedule(
+            Long topicId,
+            String name,
+            String cronExpression,
+            String timezone,
+            AutomationScheduleStatus status,
+            String misfirePolicy,
+            LocalDateTime nextPlannedRunAt) {
+        this.topicId = topicId;
+        this.name = name;
+        this.cronExpression = cronExpression;
+        this.timezone = timezone;
+        this.status = status;
+        this.misfirePolicy = misfirePolicy;
+        this.nextPlannedRunAt = nextPlannedRunAt;
+    }
+
+    public static AutomationSchedule create(
+            Long topicId,
+            String name,
+            String cronExpression,
+            String timezone,
+            AutomationScheduleStatus status,
+            String misfirePolicy,
+            LocalDateTime nextPlannedRunAt) {
+        return new AutomationSchedule(topicId, name, cronExpression, timezone, status, misfirePolicy, nextPlannedRunAt);
+    }
+
+    public Long getId() {
+        return super.getId();
+    }
+
+    public Long getTopicId() {
+        return topicId;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public String getCronExpression() {
+        return cronExpression;
+    }
+
+    public String getTimezone() {
+        return timezone;
+    }
+
+    public AutomationScheduleStatus getStatus() {
+        return status;
+    }
+
+    public String getMisfirePolicy() {
+        return misfirePolicy;
+    }
+
+    public LocalDateTime getNextPlannedRunAt() {
+        return nextPlannedRunAt;
+    }
+
+    public boolean isActive() {
+        return status == AutomationScheduleStatus.ACTIVE;
+    }
+
+    public void update(
+            String name,
+            String cronExpression,
+            String timezone,
+            AutomationScheduleStatus status,
+            String misfirePolicy,
+            LocalDateTime nextPlannedRunAt) {
+        this.name = name;
+        this.cronExpression = cronExpression;
+        this.timezone = timezone;
+        this.status = status;
+        this.misfirePolicy = misfirePolicy;
+        this.nextPlannedRunAt = nextPlannedRunAt;
+    }
 }
