@@ -35,6 +35,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
         </div>
         <nav className="admin-nav" aria-label="Administrator navigation">
           <Link href="/admin">Dashboard</Link>
+          <Link href="/admin/automation">Automation</Link>
           <Link href="/admin/posts">Posts</Link>
           <Link href="/admin/taxonomy">Taxonomy</Link>
           <Link href="/admin/audit">Audit</Link>

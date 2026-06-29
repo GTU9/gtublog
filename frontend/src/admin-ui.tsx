@@ -8,6 +8,12 @@ import type {
   AdminPostPage,
   AuditPage,
   AuditEntryResponse,
+  AutomationOutboxResponse,
+  AutomationRunDetailResponse,
+  AutomationRunResponse,
+  AutomationScheduleResponse,
+  AutomationSourceResponse,
+  AutomationTopicResponse,
   PostRevisionResponse,
   TaxonomyResponse,
 } from "@/src/admin-types";
@@ -145,6 +151,190 @@ export function DashboardStats({
         </article>
       </div>
     </>
+  );
+}
+
+export function AutomationOverview({
+  topics,
+  selectedTopicId,
+  sources,
+  schedules,
+  runs,
+  runDetail,
+  outbox,
+  running,
+  processingOutbox,
+  onSelectTopic,
+  onTriggerRun,
+  onSelectRun,
+  onProcessOutbox,
+}: {
+  topics: AutomationTopicResponse[];
+  selectedTopicId: number | null;
+  sources: AutomationSourceResponse[];
+  schedules: AutomationScheduleResponse[];
+  runs: AutomationRunResponse[];
+  runDetail: AutomationRunDetailResponse | null;
+  outbox: AutomationOutboxResponse[];
+  running: boolean;
+  processingOutbox: boolean;
+  onSelectTopic: (topicId: number) => void;
+  onTriggerRun: (topicId: number) => void;
+  onSelectRun: (runId: number) => void;
+  onProcessOutbox: () => void;
+}) {
+  return (
+    <div className="stack">
+      <div className="admin-grid">
+        <article className="admin-card stack">
+          <div className="inline-actions">
+            <h3>Automation topics</h3>
+            {selectedTopicId ? (
+              <button type="button" onClick={() => onTriggerRun(selectedTopicId)} disabled={running}>
+                {running ? "Running..." : "Run now"}
+              </button>
+            ) : null}
+          </div>
+          <ul className="admin-list">
+            {topics.map((topic) => (
+              <li key={topic.id}>
+                <button type="button" className="link-button" onClick={() => onSelectTopic(topic.id)}>
+                  {topic.name}
+                </button>
+                <span className="muted">
+                  {topic.slug} · {topic.publicationEnabled ? "publication on" : "publication off"}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </article>
+
+        <article className="admin-card stack">
+          <h3>Sources</h3>
+          <ul className="admin-list">
+            {sources.map((source) => (
+              <li key={source.id}>
+                <strong>{source.sourceType}</strong>
+                <span className="muted">
+                  {source.sourceUrl} · {source.enabled ? "enabled" : "disabled"}
+                </span>
+              </li>
+            ))}
+            {sources.length === 0 ? <li className="muted">No sources for this topic.</li> : null}
+          </ul>
+        </article>
+
+        <article className="admin-card stack">
+          <h3>Schedules</h3>
+          <ul className="admin-list">
+            {schedules.map((schedule) => (
+              <li key={schedule.id}>
+                <strong>{schedule.name}</strong>
+                <span className="muted">
+                  {schedule.cronExpression} · {schedule.timezone} · next {formatDateTime(schedule.nextPlannedRunAt)}
+                </span>
+              </li>
+            ))}
+            {schedules.length === 0 ? <li className="muted">No schedules for this topic.</li> : null}
+          </ul>
+        </article>
+      </div>
+
+      <div className="admin-grid admin-grid-wide">
+        <article className="admin-card stack">
+          <h3>Recent runs</h3>
+          <table className="admin-table">
+            <thead>
+              <tr>
+                <th>Run</th>
+                <th>Status</th>
+                <th>Trigger</th>
+                <th>Snapshots</th>
+                <th>Completed</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map((run) => (
+                <tr key={run.id}>
+                  <td>{run.runKey}</td>
+                  <td>
+                    <span className="status-pill">{run.status}</span>
+                  </td>
+                  <td>{run.triggerType}</td>
+                  <td>{run.snapshotCount}</td>
+                  <td>{formatDateTime(run.completedAt)}</td>
+                  <td>
+                    <button type="button" className="secondary-button" onClick={() => onSelectRun(run.id)}>
+                      Inspect
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </article>
+
+        <article className="admin-card stack">
+          <h3>Selected run detail</h3>
+          {runDetail ? (
+            <>
+              <p className="muted">
+                {runDetail.run.status}
+                {runDetail.run.holdReason ? ` · ${runDetail.run.holdReason}` : ""}
+              </p>
+              <ul className="admin-list">
+                {runDetail.snapshots.map((snapshot) => (
+                  <li key={snapshot.id}>
+                    <strong>{snapshot.title}</strong>
+                    <span className="muted">
+                      {snapshot.originHost} · {snapshot.policyResult} · {snapshot.canonicalUrl}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : (
+            <p className="muted">Select a run to inspect collected sources and hold reasons.</p>
+          )}
+        </article>
+      </div>
+
+      <article className="admin-card stack">
+        <div className="inline-actions">
+          <h3>Publication recovery outbox</h3>
+          <button type="button" onClick={onProcessOutbox} disabled={processingOutbox}>
+            {processingOutbox ? "Processing..." : "Replay pending events"}
+          </button>
+        </div>
+        <table className="admin-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Post</th>
+              <th>Status</th>
+              <th>Available</th>
+              <th>Last attempt</th>
+              <th>Processed</th>
+            </tr>
+          </thead>
+          <tbody>
+            {outbox.map((event) => (
+              <tr key={event.id}>
+                <td>{event.id}</td>
+                <td>{event.aggregateId}</td>
+                <td>
+                  <span className="status-pill">{event.deliveryStatus}</span>
+                </td>
+                <td>{formatDateTime(event.availableAt)}</td>
+                <td>{formatDateTime(event.lastAttemptAt)}</td>
+                <td>{formatDateTime(event.processedAt)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </article>
+    </div>
   );
 }
 

@@ -33,6 +33,7 @@ public class AutomationAdminService {
     private final SourceCollectionService sourceCollectionService;
     private final AutomationScheduleSynchronizer automationScheduleSynchronizer;
     private final GenerationJobService generationJobService;
+    private final PublicationOutboxService publicationOutboxService;
 
     public AutomationAdminService(
             AutomationTopicRepository automationTopicRepository,
@@ -44,7 +45,8 @@ public class AutomationAdminService {
             AuditService auditService,
             SourceCollectionService sourceCollectionService,
             AutomationScheduleSynchronizer automationScheduleSynchronizer,
-            GenerationJobService generationJobService) {
+            GenerationJobService generationJobService,
+            PublicationOutboxService publicationOutboxService) {
         this.automationTopicRepository = automationTopicRepository;
         this.automationSourceRepository = automationSourceRepository;
         this.automationScheduleRepository = automationScheduleRepository;
@@ -55,6 +57,7 @@ public class AutomationAdminService {
         this.sourceCollectionService = sourceCollectionService;
         this.automationScheduleSynchronizer = automationScheduleSynchronizer;
         this.generationJobService = generationJobService;
+        this.publicationOutboxService = publicationOutboxService;
     }
 
     @Transactional(readOnly = true)
@@ -179,6 +182,16 @@ public class AutomationAdminService {
                         snapshot.getRetrievedAt()))
                 .toList();
         return new AutomationRunDetailResponse(toRunResponse(run), snapshots);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AutomationOutboxResponse> outbox() {
+        return publicationOutboxService.recentEvents();
+    }
+
+    @Transactional
+    public void processOutbox() {
+        publicationOutboxService.processPendingEvents();
     }
 
     public AutomationRunResponse triggerManualRun(Long topicId, String idempotencyKey) {

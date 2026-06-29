@@ -59,3 +59,7 @@ app:
       lease-duration: PT5M
       preferred-provider: fake-provider
       schema-version: automation-job-v1
+    revalidation:
+      base-url: ""
+      shared-secret: revalidation-test-secret
+      retry-delay: PT1M

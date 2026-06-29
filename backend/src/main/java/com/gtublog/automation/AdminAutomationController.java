@@ -93,6 +93,16 @@ public class AdminAutomationController {
         return automationAdminService.runDetail(runId);
     }
 
+    @GetMapping("/outbox")
+    public List<AutomationOutboxResponse> outbox() {
+        return automationAdminService.outbox();
+    }
+
+    @PostMapping("/outbox/process")
+    public void processOutbox() {
+        automationAdminService.processOutbox();
+    }
+
     @PostMapping("/topics/{topicId}/runs/manual")
     public AutomationRunResponse triggerManualRun(@PathVariable Long topicId, @Valid @RequestBody(required = false) AutomationRunRequest request) {
         return automationAdminService.triggerManualRun(topicId, request == null ? null : request.idempotencyKey());

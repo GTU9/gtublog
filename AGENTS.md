@@ -33,6 +33,8 @@ Use package-by-feature in the backend: `auth`, `post`, `taxonomy`, `source`, `au
 
 Execute non-trivial delivery through the approved Autopilot sequence: `deep-interview -> ralplan -> ultragoal -> native subagents when useful -> code-review -> ultraqa`. Reuse approved artifacts and resume durable state rather than restarting completed phases.
 
+Story progression policy: when one implementation story is fully verified and its required Git/GitHub workflow is complete, the main agent must automatically open the next planned story and continue implementation without pausing for user confirmation. Do not stop at story boundaries merely to ask whether to proceed. Only pause for destructive, irreversible, credential-gated, external-production, or materially scope-changing decisions, or when missing authority blocks progress.
+
 For each Ultragoal story that benefits from parallel work, use three Codex native subagents. Do not substitute the tmux-based OMX `$team` runtime unless the user explicitly changes this project policy.
 
 - Subagent 1, development: implement the story, fix implementation defects, and report changed files and behavior.
@@ -53,6 +55,7 @@ If code review or UltraQA is not clean, return to the existing Ultragoal story w
 - GitHub issue titles/bodies, commit subjects/bodies, and pull request titles/bodies must be written in Korean. Commit messages must describe the behavior, tests, and important technical decisions in detail.
 - On Windows, all Git/GitHub text that contains Korean must be authored and submitted through an explicit UTF-8 path. Do not pipe Korean text directly through PowerShell standard input to `git commit`, `gh issue`, or `gh pr`; use a UTF-8 file or a UTF-8 API/client path, and verify the saved remote text before considering the step complete.
 - After verifier approval, the main agent summarizes changed files, creates the Korean GitHub issue, commits on the story branch, pushes it, opens a pull request targeting `prototype`, verifies required checks, and merges only when the pull request is clean.
+- After a story is merged into `prototype`, immediately sync local state, create the next planned story branch from the updated `prototype` head, and continue the delivery loop unless a true blocker from the story progression policy applies.
 - Never bypass the issue-before-commit rule, force-push shared branches, rewrite approved history, or merge a rejected story.
 - If GitHub authentication, repository remote, branch protection, or required external authority is unavailable, preserve the verified local story state and report the exact blocker. Do not create an untracked-policy exception or claim the GitHub workflow completed.
 

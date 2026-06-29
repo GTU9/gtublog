@@ -23,22 +23,28 @@ public class GenerationJobService {
     private final GenerationJobRepository generationJobRepository;
     private final SourceSnapshotRepository sourceSnapshotRepository;
     private final AutomationTopicRepository automationTopicRepository;
+    private final AutomationRunRepository automationRunRepository;
     private final AutomationProperties automationProperties;
     private final AuditService auditService;
+    private final AutomationPublicationService automationPublicationService;
     private final ObjectMapper objectMapper;
 
     public GenerationJobService(
             GenerationJobRepository generationJobRepository,
             SourceSnapshotRepository sourceSnapshotRepository,
             AutomationTopicRepository automationTopicRepository,
+            AutomationRunRepository automationRunRepository,
             AutomationProperties automationProperties,
             AuditService auditService,
+            AutomationPublicationService automationPublicationService,
             ObjectMapper objectMapper) {
         this.generationJobRepository = generationJobRepository;
         this.sourceSnapshotRepository = sourceSnapshotRepository;
         this.automationTopicRepository = automationTopicRepository;
+        this.automationRunRepository = automationRunRepository;
         this.automationProperties = automationProperties;
         this.auditService = auditService;
+        this.automationPublicationService = automationPublicationService;
         this.objectMapper = objectMapper;
     }
 
@@ -114,6 +120,7 @@ public class GenerationJobService {
 
         if (request.failureReason() != null && !request.failureReason().isBlank()) {
             job.fail(request.workerId(), request.failureReason(), now);
+            automationRunRepository.findById(job.getRunId()).ifPresent(run -> run.markFailed(request.failureReason(), now));
             auditService.record(
                     AuditActorType.WORKER,
                     request.workerId(),
@@ -132,13 +139,26 @@ public class GenerationJobService {
                 "excerpt", request.draft().excerpt(),
                 "contentMarkdown", request.draft().contentMarkdown(),
                 "citationSnapshotIds", request.draft().citationSnapshotIds() == null ? List.of() : request.draft().citationSnapshotIds())), now);
+        var publicationDecision = automationPublicationService.processSubmission(job, request);
+        var auditDetail = new LinkedHashMap<String, Object>();
+        auditDetail.put("citationCount", request.draft().citationSnapshotIds() == null ? 0 : request.draft().citationSnapshotIds().size());
+        auditDetail.put("published", publicationDecision.published());
+        if (publicationDecision.postId() != null) {
+            auditDetail.put("postId", publicationDecision.postId());
+        }
+        if (publicationDecision.slug() != null) {
+            auditDetail.put("slug", publicationDecision.slug());
+        }
+        if (publicationDecision.holdReason() != null) {
+            auditDetail.put("holdReason", publicationDecision.holdReason());
+        }
         auditService.record(
                 AuditActorType.WORKER,
                 request.workerId(),
                 AuditTargetType.AUTOMATION,
                 jobId.toString(),
                 "GENERATION_JOB_SUBMITTED",
-                Map.of("citationCount", request.draft().citationSnapshotIds() == null ? 0 : request.draft().citationSnapshotIds().size()));
+                auditDetail);
         return new GenerationJobSubmitResponse(job.getId(), job.getJobStatus().name(), job.getSubmittedAt());
     }
 

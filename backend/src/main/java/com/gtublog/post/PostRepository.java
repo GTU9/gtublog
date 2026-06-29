@@ -12,6 +12,8 @@ public interface PostRepository extends JpaRepository<Post, Long> {
 
     boolean existsBySlug(String slug);
 
+    boolean existsBySourceFingerprint(String sourceFingerprint);
+
     @Query("""
             select post from Post post
             where post.deletedAt is null

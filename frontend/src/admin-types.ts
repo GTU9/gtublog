@@ -59,3 +59,78 @@ export type AdminPostUpsertRequest = {
 export type AuditPage = PostPage<AuditEntryResponse>;
 export type AdminPostPage = PostPage<PostSummary>;
 export type AdminPostDetail = PostDetail;
+
+export type AutomationTopicResponse = {
+  id: number;
+  slug: string;
+  name: string;
+  promptTemplateVersion: string;
+  publicationEnabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AutomationSourceResponse = {
+  id: number;
+  topicId: number;
+  sourceType: string;
+  sourceUrl: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AutomationScheduleResponse = {
+  id: number;
+  topicId: number;
+  name: string;
+  cronExpression: string;
+  timezone: string;
+  status: string;
+  misfirePolicy: string;
+  nextPlannedRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AutomationRunResponse = {
+  id: number;
+  runKey: string;
+  topicId: number;
+  scheduleId: number | null;
+  triggerType: string;
+  status: string;
+  idempotencyKey: string;
+  holdReason: string | null;
+  snapshotCount: number;
+  startedAt: string;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AutomationRunDetailResponse = {
+  run: AutomationRunResponse;
+  snapshots: {
+    id: number;
+    sourceUrl: string;
+    canonicalUrl: string;
+    originHost: string;
+    title: string;
+    httpStatus: number;
+    policyResult: string;
+    contentHash: string;
+    retrievedAt: string;
+  }[];
+};
+
+export type AutomationOutboxResponse = {
+  id: number;
+  aggregateId: number;
+  deliveryStatus: string;
+  payloadJson: string;
+  availableAt: string | null;
+  processedAt: string | null;
+  lastAttemptAt: string | null;
+  createdAt: string;
+};
