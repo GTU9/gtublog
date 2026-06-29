@@ -1,0 +1,25 @@
+{
+  "name": "gtublog",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.7.0",
+  "engines": {
+    "node": ">=24.0.0",
+    "pnpm": ">=11.0.0"
+  },
+  "scripts": {
+    "lint": "pnpm --dir frontend lint && pnpm --dir generation-worker lint",
+    "typecheck": "pnpm --dir frontend typecheck && pnpm --dir generation-worker typecheck",
+    "test": "pnpm --dir frontend test && pnpm --dir generation-worker test && pnpm exec playwright test",
+    "build": "pnpm --dir frontend build && pnpm --dir generation-worker build",
+    "quality": "node scripts/verify-workspace.mjs",
+    "quality:node": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@types/node": "24.13.2",
+    "typescript": "5.9.3"
+  }
+}
