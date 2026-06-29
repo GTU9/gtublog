@@ -14,7 +14,7 @@ class ApiExceptionHandlerTests {
         var problemDetail = handler.handleBadRequest(new IllegalArgumentException("slug is required"));
 
         assertThat(problemDetail.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST.value());
-        assertThat(problemDetail.getTitle()).isEqualTo("잘못된 요청입니다.");
+        assertThat(problemDetail.getTitle()).isEqualTo("Bad request");
         assertThat(problemDetail.getDetail()).isEqualTo("slug is required");
     }
 }

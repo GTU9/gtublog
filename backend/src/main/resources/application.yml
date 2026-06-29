@@ -20,6 +20,25 @@ spring:
     problemdetails:
       enabled: true
 
+app:
+  auth:
+    issuer: ${AUTH_ISSUER:https://gtublog.local}
+    audience: ${AUTH_AUDIENCE:gtublog-admin}
+    access-token-ttl: ${AUTH_ACCESS_TOKEN_TTL:PT10M}
+    refresh-token-ttl: ${AUTH_REFRESH_TOKEN_TTL:P14D}
+    allowed-origins:
+      - ${AUTH_ALLOWED_ORIGIN:http://localhost:3000}
+    cookie:
+      secure: ${AUTH_COOKIE_SECURE:false}
+      domain: ${AUTH_COOKIE_DOMAIN:}
+    bootstrap:
+      username: ${ADMIN_BOOTSTRAP_USERNAME:admin}
+      password: ${ADMIN_BOOTSTRAP_PASSWORD:change-me}
+      display-name: ${ADMIN_BOOTSTRAP_DISPLAY_NAME:Administrator}
+    keys:
+      public-key-pem: ${AUTH_PUBLIC_KEY_PEM:}
+      private-key-pem: ${AUTH_PRIVATE_KEY_PEM:}
+
 management:
   endpoints:
     web:

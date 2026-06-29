@@ -36,4 +36,74 @@ public class RefreshToken extends BaseEntity {
 
     protected RefreshToken() {
     }
+
+    private RefreshToken(
+            String tokenKey,
+            Long familyId,
+            Long predecessorId,
+            String tokenHash,
+            LocalDateTime expiresAt) {
+        this.tokenKey = tokenKey;
+        this.familyId = familyId;
+        this.predecessorId = predecessorId;
+        this.tokenHash = tokenHash;
+        this.expiresAt = expiresAt;
+    }
+
+    public static RefreshToken issue(
+            String tokenKey,
+            Long familyId,
+            Long predecessorId,
+            String tokenHash,
+            LocalDateTime expiresAt) {
+        return new RefreshToken(tokenKey, familyId, predecessorId, tokenHash, expiresAt);
+    }
+
+    public String getTokenKey() {
+        return tokenKey;
+    }
+
+    public Long getFamilyId() {
+        return familyId;
+    }
+
+    public Long getPredecessorId() {
+        return predecessorId;
+    }
+
+    public String getTokenHash() {
+        return tokenHash;
+    }
+
+    public LocalDateTime getExpiresAt() {
+        return expiresAt;
+    }
+
+    public LocalDateTime getRotatedAt() {
+        return rotatedAt;
+    }
+
+    public LocalDateTime getRevokedAt() {
+        return revokedAt;
+    }
+
+    public LocalDateTime getReuseDetectedAt() {
+        return reuseDetectedAt;
+    }
+
+    public boolean isUsableAt(LocalDateTime now) {
+        return rotatedAt == null && revokedAt == null && expiresAt.isAfter(now);
+    }
+
+    public void markRotated(LocalDateTime rotatedAt) {
+        this.rotatedAt = rotatedAt;
+    }
+
+    public void markRevoked(LocalDateTime revokedAt) {
+        this.revokedAt = revokedAt;
+    }
+
+    public void markReuseDetected(LocalDateTime reuseDetectedAt) {
+        this.reuseDetectedAt = reuseDetectedAt;
+    }
 }

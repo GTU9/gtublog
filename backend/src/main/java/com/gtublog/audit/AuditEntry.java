@@ -36,4 +36,53 @@ public class AuditEntry extends BaseEntity {
 
     protected AuditEntry() {
     }
+
+    private AuditEntry(
+            AuditActorType actorType,
+            String actorId,
+            AuditTargetType targetType,
+            String targetId,
+            String actionType,
+            String detailJson) {
+        this.actorType = actorType;
+        this.actorId = actorId;
+        this.targetType = targetType;
+        this.targetId = targetId;
+        this.actionType = actionType;
+        this.detailJson = detailJson;
+    }
+
+    public static AuditEntry create(
+            AuditActorType actorType,
+            String actorId,
+            AuditTargetType targetType,
+            String targetId,
+            String actionType,
+            String detailJson) {
+        return new AuditEntry(actorType, actorId, targetType, targetId, actionType, detailJson);
+    }
+
+    public AuditActorType getActorType() {
+        return actorType;
+    }
+
+    public String getActorId() {
+        return actorId;
+    }
+
+    public AuditTargetType getTargetType() {
+        return targetType;
+    }
+
+    public String getTargetId() {
+        return targetId;
+    }
+
+    public String getActionType() {
+        return actionType;
+    }
+
+    public String getDetailJson() {
+        return detailJson;
+    }
 }

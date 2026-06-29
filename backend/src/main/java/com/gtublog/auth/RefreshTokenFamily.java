@@ -25,6 +25,9 @@ public class RefreshTokenFamily extends BaseEntity {
     @Column(name = "expires_at", nullable = false)
     private LocalDateTime expiresAt;
 
+    @Column(name = "csrf_token_hash", nullable = false, length = 64)
+    private String csrfTokenHash;
+
     @Column(name = "revoked_at")
     private LocalDateTime revokedAt;
 
@@ -32,5 +35,75 @@ public class RefreshTokenFamily extends BaseEntity {
     private String revokedReason;
 
     protected RefreshTokenFamily() {
+    }
+
+    private RefreshTokenFamily(
+            String familyKey,
+            Long adminUserId,
+            RefreshTokenFamilyStatus status,
+            LocalDateTime expiresAt,
+            String csrfTokenHash) {
+        this.familyKey = familyKey;
+        this.adminUserId = adminUserId;
+        this.status = status;
+        this.expiresAt = expiresAt;
+        this.csrfTokenHash = csrfTokenHash;
+    }
+
+    public static RefreshTokenFamily create(
+            String familyKey,
+            Long adminUserId,
+            LocalDateTime expiresAt,
+            String csrfTokenHash) {
+        return new RefreshTokenFamily(
+                familyKey,
+                adminUserId,
+                RefreshTokenFamilyStatus.ACTIVE,
+                expiresAt,
+                csrfTokenHash);
+    }
+
+    public String getFamilyKey() {
+        return familyKey;
+    }
+
+    public Long getAdminUserId() {
+        return adminUserId;
+    }
+
+    public RefreshTokenFamilyStatus getStatus() {
+        return status;
+    }
+
+    public LocalDateTime getExpiresAt() {
+        return expiresAt;
+    }
+
+    public String getCsrfTokenHash() {
+        return csrfTokenHash;
+    }
+
+    public LocalDateTime getRevokedAt() {
+        return revokedAt;
+    }
+
+    public String getRevokedReason() {
+        return revokedReason;
+    }
+
+    public boolean isActiveAt(LocalDateTime now) {
+        return status == RefreshTokenFamilyStatus.ACTIVE
+                && revokedAt == null
+                && expiresAt.isAfter(now);
+    }
+
+    public void rotateCsrfToken(String csrfTokenHash) {
+        this.csrfTokenHash = csrfTokenHash;
+    }
+
+    public void revoke(LocalDateTime revokedAt, String reason) {
+        this.status = RefreshTokenFamilyStatus.REVOKED;
+        this.revokedAt = revokedAt;
+        this.revokedReason = reason;
     }
 }
