@@ -1,6 +1,24 @@
 spring:
   application:
     name: gtublog-backend
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:gtublog}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${MYSQL_USER:gtublog}
+    password: ${MYSQL_PASSWORD:replace-with-local-password}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration/mysql
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  mvc:
+    problemdetails:
+      enabled: true
 
 management:
   endpoints:
