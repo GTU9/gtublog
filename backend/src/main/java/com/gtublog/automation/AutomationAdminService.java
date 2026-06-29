@@ -3,7 +3,6 @@ package com.gtublog.automation;
 import com.gtublog.audit.AuditActorType;
 import com.gtublog.audit.AuditService;
 import com.gtublog.audit.AuditTargetType;
-import com.gtublog.observability.PlatformMetricsService;
 import com.gtublog.post.SlugService;
 import com.gtublog.source.SourcePolicyResult;
 import com.gtublog.source.SourceSnapshotRepository;
@@ -23,8 +22,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AutomationAdminService {
 
-    private static final String DEFAULT_LEASE_OWNER = "automation-pipeline";
-
     private final AutomationTopicRepository automationTopicRepository;
     private final AutomationSourceRepository automationSourceRepository;
     private final AutomationScheduleRepository automationScheduleRepository;
@@ -36,7 +33,8 @@ public class AutomationAdminService {
     private final AutomationScheduleSynchronizer automationScheduleSynchronizer;
     private final GenerationJobService generationJobService;
     private final PublicationOutboxService publicationOutboxService;
-    private final PlatformMetricsService platformMetricsService;
+    private final SourceUrlPolicy sourceUrlPolicy;
+    private final AutomationRunLifecycleService automationRunLifecycleService;
 
     public AutomationAdminService(
             AutomationTopicRepository automationTopicRepository,
@@ -50,7 +48,8 @@ public class AutomationAdminService {
             AutomationScheduleSynchronizer automationScheduleSynchronizer,
             GenerationJobService generationJobService,
             PublicationOutboxService publicationOutboxService,
-            PlatformMetricsService platformMetricsService) {
+            SourceUrlPolicy sourceUrlPolicy,
+            AutomationRunLifecycleService automationRunLifecycleService) {
         this.automationTopicRepository = automationTopicRepository;
         this.automationSourceRepository = automationSourceRepository;
         this.automationScheduleRepository = automationScheduleRepository;
@@ -62,7 +61,8 @@ public class AutomationAdminService {
         this.automationScheduleSynchronizer = automationScheduleSynchronizer;
         this.generationJobService = generationJobService;
         this.publicationOutboxService = publicationOutboxService;
-        this.platformMetricsService = platformMetricsService;
+        this.sourceUrlPolicy = sourceUrlPolicy;
+        this.automationRunLifecycleService = automationRunLifecycleService;
     }
 
     @Transactional(readOnly = true)
@@ -100,8 +100,9 @@ public class AutomationAdminService {
     @Transactional
     public AutomationSourceResponse createSource(Long topicId, AutomationSourceRequest request) {
         requireTopic(topicId);
+        var sourceUrl = sourceUrlPolicy.validateStoredUrl(request.sourceUrl()).toASCIIString();
         var source = automationSourceRepository.save(
-                AutomationSource.create(topicId, request.sourceType(), request.sourceUrl(), request.enabled()));
+                AutomationSource.create(topicId, request.sourceType(), sourceUrl, request.enabled()));
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, source.getId().toString(), "AUTOMATION_SOURCE_CREATED", Map.of("topicId", topicId));
         return toSourceResponse(source);
     }
@@ -109,7 +110,8 @@ public class AutomationAdminService {
     @Transactional
     public AutomationSourceResponse updateSource(Long sourceId, AutomationSourceRequest request) {
         var source = automationSourceRepository.findById(sourceId).orElseThrow(() -> new NoSuchElementException("Automation source not found."));
-        source.update(request.sourceType(), request.sourceUrl(), request.enabled());
+        var sourceUrl = sourceUrlPolicy.validateStoredUrl(request.sourceUrl()).toASCIIString();
+        source.update(request.sourceType(), sourceUrl, request.enabled());
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, source.getId().toString(), "AUTOMATION_SOURCE_UPDATED", Map.of("topicId", source.getTopicId()));
         return toSourceResponse(source);
     }
@@ -248,7 +250,7 @@ public class AutomationAdminService {
 
         var enabledSources = automationSourceRepository.findAllByTopicIdAndEnabledTrueOrderByIdAsc(topicId);
         if (enabledSources.isEmpty()) {
-            completeRunAsHeld(creation.run().getId(), "No enabled automation sources are configured for this topic.");
+            automationRunLifecycleService.hold(creation.run().getId(), "No enabled automation sources are configured for this topic.");
             return runDetail(creation.run().getId()).run();
         }
 
@@ -256,52 +258,23 @@ public class AutomationAdminService {
         if (result.holdReason() == null) {
             var topic = automationTopicRepository.findById(topicId).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
             generationJobService.enqueueForRun(topic, creation.run(), result.snapshots());
-            completeRunAsSucceeded(creation.run().getId());
         } else {
-            completeRunAsHeld(creation.run().getId(), result.holdReason());
+            automationRunLifecycleService.hold(creation.run().getId(), result.holdReason());
         }
         return runDetail(creation.run().getId()).run();
     }
 
-    @Transactional
-    protected TriggerCreation createOrReuseRun(Long topicId, Long scheduleId, String triggerType, String idempotencyKey) {
-        var existing = automationRunRepository.findByIdempotencyKey(idempotencyKey);
-        if (existing.isPresent()) {
-            return new TriggerCreation(existing.get(), false);
-        }
-
+    private AutomationRunLifecycleService.StartResult createOrReuseRun(
+            Long topicId,
+            Long scheduleId,
+            String triggerType,
+            String idempotencyKey) {
         try {
-            var run = automationRunRepository.saveAndFlush(AutomationRun.start(
-                    UUID.randomUUID().toString(),
-                    topicId,
-                    scheduleId,
-                    triggerType,
-                    idempotencyKey,
-                    DEFAULT_LEASE_OWNER,
-                    LocalDateTime.now(ZoneOffset.UTC).plusMinutes(10),
-                    LocalDateTime.now(ZoneOffset.UTC)));
-            auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, run.getId().toString(), "AUTOMATION_RUN_STARTED", Map.of("triggerType", triggerType, "topicId", topicId));
-            return new TriggerCreation(run, true);
+            return automationRunLifecycleService.start(topicId, scheduleId, triggerType, idempotencyKey);
         } catch (DataIntegrityViolationException exception) {
             var duplicate = automationRunRepository.findByIdempotencyKey(idempotencyKey).orElseThrow();
-            return new TriggerCreation(duplicate, false);
+            return new AutomationRunLifecycleService.StartResult(duplicate, false);
         }
-    }
-
-    @Transactional
-    protected void completeRunAsSucceeded(Long runId) {
-        var run = automationRunRepository.findById(runId).orElseThrow(() -> new NoSuchElementException("Automation run not found."));
-        run.markSucceeded(LocalDateTime.now(ZoneOffset.UTC));
-        platformMetricsService.recordPublicationDecision("run_succeeded", run.getTriggerType());
-        auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, run.getId().toString(), "AUTOMATION_RUN_SUCCEEDED", Map.of("snapshotCount", sourceSnapshotRepository.countByAutomationRunId(runId)));
-    }
-
-    @Transactional
-    protected void completeRunAsHeld(Long runId, String holdReason) {
-        var run = automationRunRepository.findById(runId).orElseThrow(() -> new NoSuchElementException("Automation run not found."));
-        run.markHeld(holdReason, LocalDateTime.now(ZoneOffset.UTC));
-        platformMetricsService.recordPublicationDecision("run_held", holdReason);
-        auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, run.getId().toString(), "AUTOMATION_RUN_HELD", Map.of("holdReason", holdReason));
     }
 
     private String uniqueTopicSlug(String providedSlug, String fallbackName, Long currentId) {
@@ -415,6 +388,4 @@ public class AutomationAdminService {
                 run.getUpdatedAt());
     }
 
-    protected record TriggerCreation(AutomationRun run, boolean createdNew) {
-    }
 }

@@ -5,12 +5,8 @@ import com.gtublog.source.SourcePolicyResult;
 import com.gtublog.source.SourceSnapshot;
 import com.gtublog.source.SourceSnapshotRepository;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.HexFormat;
@@ -22,17 +18,21 @@ import org.springframework.stereotype.Service;
 @Service
 public class SourceCollectionService {
 
-    private final HttpClient httpClient = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(5))
-            .followRedirects(HttpClient.Redirect.NORMAL)
-            .build();
-
+    private static final int MAX_REDIRECTS = 5;
     private final SourceSnapshotRepository sourceSnapshotRepository;
     private final PlatformMetricsService platformMetricsService;
+    private final SourceUrlPolicy sourceUrlPolicy;
+    private final PinnedSourceHttpClient sourceHttpClient;
 
-    public SourceCollectionService(SourceSnapshotRepository sourceSnapshotRepository, PlatformMetricsService platformMetricsService) {
+    public SourceCollectionService(
+            SourceSnapshotRepository sourceSnapshotRepository,
+            PlatformMetricsService platformMetricsService,
+            SourceUrlPolicy sourceUrlPolicy,
+            PinnedSourceHttpClient sourceHttpClient) {
         this.sourceSnapshotRepository = sourceSnapshotRepository;
         this.platformMetricsService = platformMetricsService;
+        this.sourceUrlPolicy = sourceUrlPolicy;
+        this.sourceHttpClient = sourceHttpClient;
     }
 
     public CollectionResult collect(Long topicId, Long runId, List<AutomationSource> sources) {
@@ -45,20 +45,13 @@ public class SourceCollectionService {
 
     private SourceSnapshot collectSingle(Long topicId, Long runId, AutomationSource source) {
         try {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(source.getSourceUrl()))
-                    .header("User-Agent", "GTUBlogBot/0.1 (+https://gtublog.dev)")
-                    .timeout(Duration.ofSeconds(10))
-                    .GET()
-                    .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            var body = response.body() == null ? "" : response.body();
-            var document = Jsoup.parse(body, source.getSourceUrl());
-            var canonical = document.select("link[rel=canonical]").attr("href");
-            if (canonical == null || canonical.isBlank()) {
-                canonical = source.getSourceUrl();
-            }
+            var fetchResult = fetch(source.getSourceUrl());
+            var response = fetchResult;
+            var body = new String(fetchResult.body(), StandardCharsets.UTF_8);
+            var document = Jsoup.parse(body, response.uri().toString());
+            var canonical = validatedCanonicalUrl(document.select("link[rel=canonical]").attr("href"), response.uri());
             var title = document.title();
-            var originHost = hostOf(canonical);
+            var originHost = response.uri().getHost();
             var snapshot = SourceSnapshot.create(
                     UUID.randomUUID().toString(),
                     topicId,
@@ -70,11 +63,11 @@ public class SourceCollectionService {
                     title == null || title.isBlank() ? null : title,
                     LocalDateTime.now(ZoneOffset.UTC),
                     response.statusCode(),
-                    response.headers().firstValue("ETag").orElse(null),
-                    response.headers().firstValue("Last-Modified").orElse(null),
+                    response.firstHeader("etag"),
+                    response.firstHeader("last-modified"),
                     sha256(body),
                     response.statusCode() >= 200 && response.statusCode() < 300 ? SourcePolicyResult.ALLOWED : SourcePolicyResult.HELD,
-                    excerpt(body));
+                    excerpt(document.text()));
             var saved = sourceSnapshotRepository.save(snapshot);
             platformMetricsService.recordSourceSnapshot(saved.getPolicyResult().name(), source.getSourceType().name());
             return saved;
@@ -92,13 +85,57 @@ public class SourceCollectionService {
                     0,
                     null,
                     null,
-                    sha256(exception.getMessage()),
+                    sha256(exception.getClass().getName() + ":" + safeFailureReason(exception)),
                     SourcePolicyResult.HELD,
-                    excerpt(exception.getMessage()));
+                    safeFailureReason(exception));
             var saved = sourceSnapshotRepository.save(snapshot);
             platformMetricsService.recordSourceSnapshot(saved.getPolicyResult().name(), source.getSourceType().name());
             return saved;
         }
+    }
+
+    private PinnedSourceHttpClient.SourceHttpResponse fetch(String sourceUrl) throws Exception {
+        var currentTarget = sourceUrlPolicy.resolveFetchUrl(sourceUrl);
+        for (int redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
+            var response = sourceHttpClient.get(currentTarget);
+            if (isRedirect(response.statusCode())) {
+                var location = response.firstHeader("location");
+                if (location == null || location.isBlank()) {
+                    throw new IllegalArgumentException("Source redirect did not include a destination.");
+                }
+                var nextTarget = sourceUrlPolicy.resolveFetchUrl(response.uri().resolve(location).toString());
+                if ("https".equalsIgnoreCase(response.uri().getScheme())
+                        && !"https".equalsIgnoreCase(nextTarget.uri().getScheme())) {
+                    throw new IllegalArgumentException("Source redirects must not downgrade HTTPS to HTTP.");
+                }
+                currentTarget = nextTarget;
+                continue;
+            }
+            return response;
+        }
+        throw new IllegalArgumentException("Source redirect limit was exceeded.");
+    }
+
+    private boolean isRedirect(int statusCode) {
+        return statusCode == 301 || statusCode == 302 || statusCode == 303 || statusCode == 307 || statusCode == 308;
+    }
+
+    private String validatedCanonicalUrl(String canonical, URI responseUri) {
+        if (canonical == null || canonical.isBlank()) {
+            return responseUri.toString();
+        }
+        try {
+            return sourceUrlPolicy.validateStoredUrl(responseUri.resolve(canonical).toString()).toASCIIString();
+        } catch (IllegalArgumentException exception) {
+            return responseUri.toString();
+        }
+    }
+
+    private String safeFailureReason(Exception exception) {
+        if (exception instanceof IllegalArgumentException && exception.getMessage() != null) {
+            return excerpt(exception.getMessage());
+        }
+        return "Source collection failed.";
     }
 
     private String excerpt(String value) {
@@ -127,4 +164,5 @@ public class SourceCollectionService {
 
     public record CollectionResult(List<SourceSnapshot> snapshots, String holdReason) {
     }
+
 }

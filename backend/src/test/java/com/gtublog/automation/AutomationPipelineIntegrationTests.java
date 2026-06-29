@@ -3,6 +3,7 @@ package com.gtublog.automation;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.oauth2.jose.jws.SignatureAlgorithm.RS256;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -131,6 +132,43 @@ class AutomationPipelineIntegrationTests {
     }
 
     @Test
+    void rejectsPrivateSourceAddressesAndBlocksRedirectsToMetadataServices() {
+        var topic = automationAdminService.createTopic(new AutomationTopicRequest(
+                null,
+                "Security Topic",
+                "v1",
+                false));
+
+        assertThatThrownBy(() -> automationAdminService.createSource(topic.id(), new AutomationSourceRequest(
+                        AutomationSourceType.HTML,
+                        "http://169.254.169.254/latest/meta-data",
+                        true)))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("private network");
+
+        WIREMOCK.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get(urlEqualTo("/redirect-to-metadata"))
+                .willReturn(aResponse()
+                        .withStatus(302)
+                        .withHeader("Location", "http://169.254.169.254/latest/meta-data")));
+        automationAdminService.createSource(topic.id(), new AutomationSourceRequest(
+                AutomationSourceType.HTML,
+                WIREMOCK.baseUrl() + "/redirect-to-metadata",
+                true));
+
+        var run = automationAdminService.triggerManualRun(topic.id(), "security-redirect-run");
+
+        assertThat(run.status()).isEqualTo(AutomationRunStatus.HELD);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT policy_result FROM source_snapshot WHERE automation_run_id = ?",
+                String.class,
+                run.id())).isEqualTo("HELD");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT body_excerpt FROM source_snapshot WHERE automation_run_id = ?",
+                String.class,
+                run.id())).contains("private network");
+    }
+
+    @Test
     void supportsTopicSourceScheduleCrudAndManualRunCollection() throws Exception {
         stubAccessibleSource("/topic-feed");
         var bearerToken = bearerToken();
@@ -186,7 +224,7 @@ class AutomationPipelineIntegrationTests {
                 .andReturn();
 
         long runId = jsonBody(runResult).get("id").asLong();
-        assertThat(jsonBody(runResult).get("status").asText()).isEqualTo("SUCCEEDED");
+        assertThat(jsonBody(runResult).get("status").asText()).isEqualTo("RUNNING");
         assertThat(jsonBody(runResult).get("snapshotCount").asLong()).isEqualTo(1L);
 
         mockMvc.perform(get("/api/v1/admin/automation/runs/{runId}", runId)
@@ -195,6 +233,7 @@ class AutomationPipelineIntegrationTests {
                 .andExpect(result -> {
                     var json = jsonBody(result);
                     assertThat(json.at("/run/triggerType").asText()).isEqualTo("MANUAL");
+                    assertThat(json.at("/run/status").asText()).isEqualTo("RUNNING");
                     assertThat(json.at("/snapshots/0/policyResult").asText()).isEqualTo("ALLOWED");
                     assertThat(json.at("/snapshots/0/sourceUrl").asText()).contains("/topic-feed");
                 });
@@ -317,7 +356,7 @@ class AutomationPipelineIntegrationTests {
                 .andExpect(status().isOk())
                 .andExpect(result -> {
                     var json = jsonBody(result);
-                    assertThat(json.at("/runCounts/succeeded").asLong()).isGreaterThanOrEqualTo(1L);
+                    assertThat(json.at("/runCounts/running").asLong()).isGreaterThanOrEqualTo(1L);
                     assertThat(json.at("/jobCounts/pending").asLong()).isGreaterThanOrEqualTo(0L);
                     assertThat(json.at("/outboxCounts/pending").asLong()).isGreaterThanOrEqualTo(0L);
                     assertThat(json.at("/generatedAt").asText()).isNotBlank();

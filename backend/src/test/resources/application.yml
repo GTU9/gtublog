@@ -54,6 +54,8 @@ app:
         BhD9TPSydm4Sn09lJ45sfMDD
         -----END PRIVATE KEY-----
   automation:
+    collection:
+      allowed-private-hosts: localhost,127.0.0.1
     worker:
       shared-token: worker-test-token
       lease-duration: PT5M

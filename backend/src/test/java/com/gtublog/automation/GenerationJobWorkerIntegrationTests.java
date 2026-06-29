@@ -283,6 +283,41 @@ class GenerationJobWorkerIntegrationTests {
     }
 
     @Test
+    void rejectsSubmissionWhenPromptVersionDoesNotMatchClaimedContract() throws Exception {
+        var job = seedGenerationJob();
+
+        mockMvc.perform(post("/api/v1/internal/generation-jobs/claim")
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "workerId":"worker-a",
+                                  "supportedProviders":["fake-provider"],
+                                  "supportedSchemaVersions":["automation-job-v1"]
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/v1/internal/generation-jobs/{jobId}/submit", job.getId())
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "workerId":"worker-a",
+                                  "providerName":"fake-provider",
+                                  "promptVersion":"unexpected-prompt-version",
+                                  "schemaVersion":"automation-job-v1",
+                                  "failureReason":"provider failed"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT job_status FROM generation_job WHERE id = ?", String.class, job.getId()))
+                .isEqualTo("CLAIMED");
+    }
+
+    @Test
     void returnsNoContentWhenNoCompatibleJobExists() throws Exception {
         seedGenerationJob();
 
@@ -313,7 +348,7 @@ class GenerationJobWorkerIntegrationTests {
                 true));
         automationAdminService.createSource(topic.id(), new AutomationSourceRequest(
                 AutomationSourceType.HTML,
-                WIREMOCK.baseUrl() + "/worker-feed-2",
+                WIREMOCK.baseUrl().replace("localhost", "127.0.0.1") + "/worker-feed-2",
                 true));
         var run = automationAdminService.triggerManualRun(topic.id(), "story-8-run");
         return generationJobRepository.findByRunId(run.id()).orElseThrow();

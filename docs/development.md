@@ -8,6 +8,8 @@
 
 Copy `.env.example` to the ignored `.env` file and replace every placeholder locally. Never commit the resulting file.
 
+Source collection rejects loopback, private, link-local, reserved, and metadata-network destinations by default, including redirect targets. Keep `AUTOMATION_COLLECTION_ALLOWED_PRIVATE_HOSTS` empty outside isolated development and tests. If a local feed is required, list only the exact trusted host names separated by commas; do not use broad network ranges.
+
 ## Start infrastructure
 
 ```powershell
