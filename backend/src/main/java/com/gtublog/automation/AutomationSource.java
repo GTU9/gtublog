@@ -26,4 +26,41 @@ public class AutomationSource extends BaseEntity {
 
     protected AutomationSource() {
     }
+
+    private AutomationSource(Long topicId, AutomationSourceType sourceType, String sourceUrl, boolean enabled) {
+        this.topicId = topicId;
+        this.sourceType = sourceType;
+        this.sourceUrl = sourceUrl;
+        this.enabled = enabled;
+    }
+
+    public static AutomationSource create(Long topicId, AutomationSourceType sourceType, String sourceUrl, boolean enabled) {
+        return new AutomationSource(topicId, sourceType, sourceUrl, enabled);
+    }
+
+    public Long getId() {
+        return super.getId();
+    }
+
+    public Long getTopicId() {
+        return topicId;
+    }
+
+    public AutomationSourceType getSourceType() {
+        return sourceType;
+    }
+
+    public String getSourceUrl() {
+        return sourceUrl;
+    }
+
+    public boolean isEnabled() {
+        return Boolean.TRUE.equals(enabled);
+    }
+
+    public void update(AutomationSourceType sourceType, String sourceUrl, boolean enabled) {
+        this.sourceType = sourceType;
+        this.sourceUrl = sourceUrl;
+        this.enabled = enabled;
+    }
 }

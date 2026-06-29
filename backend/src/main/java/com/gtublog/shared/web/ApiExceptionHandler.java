@@ -2,6 +2,8 @@ package com.gtublog.shared.web;
 
 import java.net.URI;
 import java.util.NoSuchElementException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -12,6 +14,8 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 class ApiExceptionHandler {
+
+    private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
     @ExceptionHandler(IllegalArgumentException.class)
     ProblemDetail handleBadRequest(IllegalArgumentException exception) {
@@ -45,6 +49,7 @@ class ApiExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     ProblemDetail handleUnexpected(Exception exception) {
+        log.error("Unhandled API exception", exception);
         return problemDetail(
                 HttpStatus.INTERNAL_SERVER_ERROR,
                 "Unexpected error",

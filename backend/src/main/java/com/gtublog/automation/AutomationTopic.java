@@ -23,4 +23,42 @@ public class AutomationTopic extends BaseEntity {
 
     protected AutomationTopic() {
     }
+
+    private AutomationTopic(String slug, String name, String promptTemplateVersion, boolean publicationEnabled) {
+        this.slug = slug;
+        this.name = name;
+        this.promptTemplateVersion = promptTemplateVersion;
+        this.publicationEnabled = publicationEnabled;
+    }
+
+    public static AutomationTopic create(String slug, String name, String promptTemplateVersion, boolean publicationEnabled) {
+        return new AutomationTopic(slug, name, promptTemplateVersion, publicationEnabled);
+    }
+
+    public Long getId() {
+        return super.getId();
+    }
+
+    public String getSlug() {
+        return slug;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public String getPromptTemplateVersion() {
+        return promptTemplateVersion;
+    }
+
+    public boolean isPublicationEnabled() {
+        return Boolean.TRUE.equals(publicationEnabled);
+    }
+
+    public void update(String slug, String name, String promptTemplateVersion, boolean publicationEnabled) {
+        this.slug = slug;
+        this.name = name;
+        this.promptTemplateVersion = promptTemplateVersion;
+        this.publicationEnabled = publicationEnabled;
+    }
 }
