@@ -27,3 +27,7 @@ Story 8 adds the shared generation-job contract, internal worker claim/submit AP
 ## Quality gates
 
 `pnpm quality` runs the backend clean/check/package gate, Node lint/typecheck/tests/builds, Playwright, and Compose configuration validation. A running Docker daemon is required; without one, the mandatory MySQL Testcontainers task fails the command.
+
+The remote baseline lives in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). It runs the backend check, frontend and generation-worker quality jobs, Playwright E2E, and `docker compose config` on GitHub Actions for `prototype`, `story/**`, and pull requests targeting `prototype`.
+
+Use the local gate before pushing when possible; use the remote workflow as the merge guard and Linux runner parity check.

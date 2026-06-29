@@ -39,3 +39,4 @@ Recommended local verification steps:
 - `pnpm --dir generation-worker build`
 - `pnpm exec playwright test`
 - `docker compose config`
+- Confirm the GitHub Actions workflow at [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) passed on the story branch or pull request before merge.
