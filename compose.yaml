@@ -1,6 +1,47 @@
 name: gtublog
 
 services:
+  generation-worker:
+    profiles: ["generation"]
+    build:
+      context: .
+      dockerfile: generation-worker/Dockerfile
+    restart: unless-stopped
+    user: worker
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=256m
+      - /home/worker:rw,noexec,nosuid,nodev,size=128m
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "node", "dist/healthcheck.js"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    environment:
+      GENERATION_BACKEND_BASE_URL: ${GENERATION_BACKEND_BASE_URL:-http://host.docker.internal:8080}
+      GENERATION_WORKER_TOKEN: ${GENERATION_WORKER_TOKEN:-}
+      GENERATION_WORKER_ID: ${GENERATION_WORKER_ID:-gtublog-worker}
+      GENERATION_CODEX_ENV_ISOLATION_APPROVED: ${GENERATION_CODEX_ENV_ISOLATION_APPROVED:-false}
+      GENERATION_CODEX_CANARY_ATTESTATION_PATH: ${GENERATION_CODEX_CANARY_ATTESTATION_PATH:-}
+      CODEX_API_KEY: ${CODEX_API_KEY:-}
+      GENERATION_POLL_INTERVAL_MS: ${GENERATION_POLL_INTERVAL_MS:-5000}
+      GENERATION_REQUEST_TIMEOUT_MS: ${GENERATION_REQUEST_TIMEOUT_MS:-10000}
+      GENERATION_HEARTBEAT_INTERVAL_MS: ${GENERATION_HEARTBEAT_INTERVAL_MS:-30000}
+      GENERATION_TIMEOUT_MS: ${GENERATION_TIMEOUT_MS:-240000}
+      GENERATION_LEASE_SAFETY_MARGIN_MS: ${GENERATION_LEASE_SAFETY_MARGIN_MS:-45000}
+      GENERATION_SHUTDOWN_GRACE_MS: ${GENERATION_SHUTDOWN_GRACE_MS:-20000}
+      GENERATION_ERROR_BACKOFF_MIN_MS: ${GENERATION_ERROR_BACKOFF_MIN_MS:-1000}
+      GENERATION_ERROR_BACKOFF_MAX_MS: ${GENERATION_ERROR_BACKOFF_MAX_MS:-60000}
+      GENERATION_HEALTH_FILE: /tmp/gtublog-worker-health.json
+      GENERATION_READINESS_MAX_AGE_MS: ${GENERATION_READINESS_MAX_AGE_MS:-120000}
+
   mysql:
     image: mysql:8.4.10@sha256:d36d39a64cd12a5c1cc9e6aa2bfb5f8d4c81a2f6586e0a04a9ae13939db02209
     restart: unless-stopped

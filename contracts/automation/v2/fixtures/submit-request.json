@@ -1,0 +1,14 @@
+{
+  "terminalSubmissionId": "11111111-1111-4111-8111-111111111111",
+  "payloadDigest": "9eaf425cb7dc7bd247d001aca162b3542e83aeeb04298df8b73b8b6fca049c9e",
+  "workerId": "worker-fixture",
+  "providerName": "codex-sdk",
+  "promptVersion": "prompt-v1",
+  "schemaVersion": "automation-job-v2",
+  "draft": {
+    "title": "Fixture title",
+    "excerpt": "Fixture excerpt",
+    "contentMarkdown": "# Fixture body",
+    "citationSnapshotIds": [1]
+  }
+}

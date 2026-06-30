@@ -8,7 +8,9 @@ import { createFakeGenerationProvider } from "./fake-provider.js";
 import {
   CONTRACT_SCHEMA_VERSION,
   assertClaimResponse,
+  assertHeartbeatResponse,
   assertSubmitRequest,
+  assertSubmitResponse,
   createWorkerRuntime,
 } from "./runtime.js";
 import { createGenerationWorker, type GenerationProvider } from "./provider.js";
@@ -52,7 +54,7 @@ describe("provider-neutral worker runtime", () => {
       citationSnapshotIds: [1],
       provider: "test",
     });
-    expect(generate).toHaveBeenCalledWith(request);
+    expect(generate).toHaveBeenCalledWith(request, undefined);
   });
 
   it("passes hostile prompt text through as inert content", async () => {
@@ -94,7 +96,7 @@ describe("provider-neutral worker runtime", () => {
         runId: 7,
         topicId: 8,
         leaseOwner: "worker-a",
-        leaseExpiresAt: "2026-06-29T00:05:00",
+        leaseExpiresAt: "2099-06-29T00:05:00Z",
         providerName: "fake-provider",
         promptVersion: "prompt-v1",
         schemaVersion: CONTRACT_SCHEMA_VERSION,
@@ -107,13 +109,24 @@ describe("provider-neutral worker runtime", () => {
             title: "Source",
             originHost: "example.com",
             bodyExcerpt: "excerpt",
-            contentHash: "hash",
-            retrievedAt: "2026-06-29T00:00:00",
+            contentHash: "a".repeat(64),
+            retrievedAt: "2026-06-29T00:00:00Z",
           },
         ],
       }),
-      heartbeat: vi.fn().mockResolvedValue(undefined),
-      submit: vi.fn().mockResolvedValue(undefined),
+      heartbeat: vi.fn().mockResolvedValue({
+        jobId: 3,
+        status: "CLAIMED",
+        serverTime: "2026-06-29T00:00:30Z",
+        leaseExpiresAt: "2099-06-29T00:05:00Z",
+      }),
+      submit: vi.fn().mockResolvedValue({
+        jobId: 3,
+        status: "SUBMITTED",
+        submittedAt: "2026-06-29T00:01:00Z",
+        terminalSubmissionId: "11111111-1111-4111-8111-111111111111",
+        payloadDigest: "a".repeat(64),
+      }),
     };
     const runtime = createWorkerRuntime({
       client,
@@ -124,7 +137,11 @@ describe("provider-neutral worker runtime", () => {
 
     expect(claim?.jobId).toBe(3);
     expect(client.claim).toHaveBeenCalledOnce();
-    expect(client.heartbeat).toHaveBeenCalledWith(3, { workerId: "worker-a" });
+    expect(client.heartbeat).toHaveBeenCalledWith(
+      3,
+      { workerId: "worker-a" },
+      expect.any(AbortSignal),
+    );
     expect(client.submit).toHaveBeenCalledOnce();
   });
 
@@ -136,15 +153,37 @@ describe("provider-neutral worker runtime", () => {
         runId: 9,
         topicId: 10,
         leaseOwner: "worker-b",
-        leaseExpiresAt: "2026-06-29T00:05:00",
+        leaseExpiresAt: "2026-06-29T00:05:00Z",
         providerName: "failing-provider",
         promptVersion: "prompt-v1",
         schemaVersion: CONTRACT_SCHEMA_VERSION,
         prompt: "초안을 작성하라",
-        snapshots: [],
+        snapshots: [
+          {
+            snapshotId: 1,
+            sourceUrl: "https://example.com",
+            canonicalUrl: "https://example.com",
+            title: "Source",
+            originHost: "example.com",
+            bodyExcerpt: "excerpt",
+            contentHash: "b".repeat(64),
+            retrievedAt: "2026-06-29T00:00:00Z",
+          },
+        ],
       }),
-      heartbeat: vi.fn().mockResolvedValue(undefined),
-      submit: vi.fn().mockResolvedValue(undefined),
+      heartbeat: vi.fn().mockResolvedValue({
+        jobId: 4,
+        status: "CLAIMED",
+        serverTime: "2026-06-29T00:00:30Z",
+        leaseExpiresAt: "2026-06-29T00:05:00Z",
+      }),
+      submit: vi.fn().mockResolvedValue({
+        jobId: 4,
+        status: "FAILED",
+        submittedAt: "2026-06-29T00:01:00Z",
+        terminalSubmissionId: "11111111-1111-4111-8111-111111111111",
+        payloadDigest: "a".repeat(64),
+      }),
     };
     const runtime = createWorkerRuntime({
       client,
@@ -159,31 +198,44 @@ describe("provider-neutral worker runtime", () => {
       4,
       expect.objectContaining({
         workerId: "worker-b",
-        failureReason: "provider unavailable",
+        failureReason: "Error",
       }),
+      expect.any(AbortSignal),
     );
   });
 
   it("validates fixture payloads against the shared runtime contract", () => {
     const claimFixture = JSON.parse(
       readFileSync(
-        path.resolve(process.cwd(), "..", "contracts", "automation", "v1", "fixtures", "claim-response.json"),
+        path.resolve(process.cwd(), "..", "contracts", "automation", "v2", "fixtures", "claim-response.json"),
         "utf8",
       ),
     ) as unknown;
     const submitFixture = JSON.parse(
       readFileSync(
-        path.resolve(process.cwd(), "..", "contracts", "automation", "v1", "fixtures", "submit-request.json"),
+        path.resolve(process.cwd(), "..", "contracts", "automation", "v2", "fixtures", "submit-request.json"),
         "utf8",
       ),
     ) as unknown;
+    const heartbeatFixture = JSON.parse(
+      readFileSync(
+        path.resolve(process.cwd(), "..", "contracts", "automation", "v2", "fixtures", "heartbeat-response.json"),
+        "utf8",
+      ),
+    ) as unknown;
+    const submitResponseFixture = JSON.parse(
+      readFileSync(path.resolve(process.cwd(), "..", "contracts", "automation", "v2", "fixtures", "submit-response.json"), "utf8"),
+    ) as unknown;
 
     expect(() => assertClaimResponse(claimFixture)).not.toThrow();
+    expect(() => assertHeartbeatResponse(heartbeatFixture)).not.toThrow();
     expect(() => assertSubmitRequest(submitFixture)).not.toThrow();
+    expect(() => assertSubmitResponse(submitResponseFixture)).not.toThrow();
   });
 
   it("keeps the Codex adapter behind the same provider contract", async () => {
     const provider = createCodexGenerationProvider({
+      workingDirectory: process.cwd(),
       codexFactory: () => ({
         startThread() {
           return {
@@ -217,5 +269,48 @@ describe("provider-neutral worker runtime", () => {
       citationSnapshotIds: [1, 2],
       provider: "codex-sdk",
     });
+  });
+
+  it.each([
+    ["blank title", { title: "" }],
+    ["oversized title", { title: "t".repeat(301) }],
+    ["blank excerpt", { excerpt: "" }],
+    ["oversized excerpt", { excerpt: "e".repeat(1_001) }],
+    ["blank content", { contentMarkdown: "" }],
+    ["oversized content", { contentMarkdown: "c".repeat(100_001) }],
+    ["zero citation", { citationSnapshotIds: [0] }],
+    ["negative citation", { citationSnapshotIds: [-1] }],
+    ["fractional citation", { citationSnapshotIds: [1.5] }],
+    ["unsafe citation", { citationSnapshotIds: [Number.MAX_SAFE_INTEGER + 1] }],
+    ["too many citations", { citationSnapshotIds: Array.from({ length: 101 }, (_, index) => index + 1) }],
+  ])("rejects invalid provider output before a success terminal: %s", async (_name, override) => {
+    const provider = createCodexGenerationProvider({
+      workingDirectory: process.cwd(),
+      codexFactory: () => ({
+        startThread() {
+          return {
+            run: vi.fn().mockResolvedValue({
+              finalResponse: JSON.stringify({
+                title: "Valid title",
+                excerpt: "Valid excerpt",
+                contentMarkdown: "Valid content",
+                citationSnapshotIds: [1],
+                ...override,
+              }),
+            }),
+          };
+        },
+      }),
+    });
+
+    await expect(provider.generate({
+      jobId: "job-invalid",
+      runId: 1,
+      topicId: 1,
+      promptVersion: "prompt-v1",
+      schemaVersion: CONTRACT_SCHEMA_VERSION,
+      snapshots: [],
+      prompt: "Generate",
+    })).rejects.toThrow("invalid structured draft");
   });
 });

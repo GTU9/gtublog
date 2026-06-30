@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gtublog.dev/contracts/automation/v2/heartbeat-response.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["jobId", "status", "serverTime", "leaseExpiresAt"],
+  "properties": {
+    "jobId": { "type": "integer", "minimum": 1 },
+    "status": { "type": "string" },
+    "serverTime": { "type": "string", "format": "date-time" },
+    "leaseExpiresAt": { "type": "string", "format": "date-time" }
+  }
+}

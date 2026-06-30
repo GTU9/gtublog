@@ -9,7 +9,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
@@ -50,6 +52,26 @@ class ApiExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException.class)
     ProblemDetail handleConflict(DataIntegrityViolationException exception) {
         return problemDetail(HttpStatus.CONFLICT, "Conflict", "The request conflicts with current data state.");
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    ProblemDetail handleUnreadableMessage(HttpMessageNotReadableException exception) {
+        return problemDetail(HttpStatus.BAD_REQUEST, "Bad request", "The request body is malformed or inconsistent.");
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    ProblemDetail handleInvalidMethodArgument(MethodArgumentNotValidException exception) {
+        return problemDetail(HttpStatus.BAD_REQUEST, "Bad request", "The request body violates the API contract.");
+    }
+
+    @ExceptionHandler(com.gtublog.automation.TerminalSubmissionConflictException.class)
+    ProblemDetail handleTerminalConflict(com.gtublog.automation.TerminalSubmissionConflictException exception) {
+        return problemDetail(HttpStatus.CONFLICT, "Terminal submission conflict", exception.getMessage());
+    }
+
+    @ExceptionHandler(com.gtublog.automation.GenerationLeaseLostException.class)
+    ProblemDetail handleLeaseLost(com.gtublog.automation.GenerationLeaseLostException exception) {
+        return problemDetail(HttpStatus.CONFLICT, "Generation lease lost", exception.getMessage());
     }
 
     @ExceptionHandler(Exception.class)

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gtublog.dev/contracts/automation/v2/claim-response.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["jobId", "jobKey", "runId", "topicId", "leaseOwner", "leaseExpiresAt", "providerName", "promptVersion", "schemaVersion", "prompt", "snapshots"],
+  "properties": {
+    "jobId": { "type": "integer", "minimum": 1 }, "jobKey": { "type": "string", "minLength": 1, "maxLength": 36 },
+    "runId": { "type": "integer", "minimum": 1 }, "topicId": { "type": "integer", "minimum": 1 },
+    "leaseOwner": { "type": "string", "minLength": 1, "maxLength": 120 }, "leaseExpiresAt": { "type": "string", "format": "date-time" },
+    "providerName": { "type": "string", "minLength": 1, "maxLength": 64 }, "promptVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "schemaVersion": { "const": "automation-job-v2" }, "prompt": { "type": "string", "minLength": 1, "maxLength": 100000 },
+    "snapshots": { "type": "array", "minItems": 1, "maxItems": 100, "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["snapshotId", "sourceUrl", "canonicalUrl", "title", "originHost", "bodyExcerpt", "contentHash", "retrievedAt"],
+      "properties": {
+        "snapshotId": { "type": "integer", "minimum": 1 }, "sourceUrl": { "type": "string", "format": "uri", "maxLength": 2048 },
+        "canonicalUrl": { "type": "string", "format": "uri", "maxLength": 2048 }, "title": { "type": ["string", "null"], "maxLength": 300 },
+        "originHost": { "type": "string", "minLength": 1, "maxLength": 253 }, "bodyExcerpt": { "type": ["string", "null"], "maxLength": 50000 },
+        "contentHash": { "type": "string", "pattern": "^[0-9a-f]{64}$" }, "retrievedAt": { "type": "string", "format": "date-time" }
+      }
+    } }
+  }
+}

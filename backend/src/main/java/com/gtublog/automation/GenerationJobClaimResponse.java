@@ -1,6 +1,6 @@
 package com.gtublog.automation;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 
 public record GenerationJobClaimResponse(
@@ -9,7 +9,7 @@ public record GenerationJobClaimResponse(
         Long runId,
         Long topicId,
         String leaseOwner,
-        LocalDateTime leaseExpiresAt,
+        Instant leaseExpiresAt,
         String providerName,
         String promptVersion,
         String schemaVersion,
@@ -24,6 +24,6 @@ public record GenerationJobClaimResponse(
             String originHost,
             String bodyExcerpt,
             String contentHash,
-            LocalDateTime retrievedAt) {
+            Instant retrievedAt) {
     }
 }

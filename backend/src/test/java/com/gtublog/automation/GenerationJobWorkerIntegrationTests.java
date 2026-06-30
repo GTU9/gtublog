@@ -31,6 +31,8 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDateTime;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -101,11 +103,15 @@ class GenerationJobWorkerIntegrationTests {
     private GenerationJobService generationJobService;
 
     @Autowired
+    private TerminalPayloadDigester terminalPayloadDigester;
+
+    @Autowired
     private AutomationRunRecoveryService automationRunRecoveryService;
 
     @Autowired
     void configureMockMvc(WebApplicationContext context) {
         this.mockMvc = MockMvcBuilders.webAppContextSetup(context)
+                .addFilters(context.getBean(WorkerRequestSizeFilter.class))
                 .apply(springSecurity())
                 .build();
     }
@@ -129,14 +135,14 @@ class GenerationJobWorkerIntegrationTests {
 
     @Test
     void claimRequiresWorkerToken() throws Exception {
-        mockMvc.perform(post("/api/v1/internal/generation-jobs/claim")
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/claim")
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, "wrong-token")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "workerId":"worker-a",
                                   "supportedProviders":["fake-provider"],
-                                  "supportedSchemaVersions":["automation-job-v1"]
+                                  "supportedSchemaVersions":["automation-job-v2"]
                                 }
                                 """))
                 .andExpect(status().isForbidden());
@@ -146,14 +152,14 @@ class GenerationJobWorkerIntegrationTests {
     void workerCanClaimHeartbeatAndSubmitGeneratedDraft() throws Exception {
         var job = seedGenerationJob();
 
-        var claimResult = mockMvc.perform(post("/api/v1/internal/generation-jobs/claim")
+        var claimResult = mockMvc.perform(post("/api/v2/internal/generation-jobs/claim")
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "workerId":"worker-a",
                                   "supportedProviders":["fake-provider"],
-                                  "supportedSchemaVersions":["automation-job-v1"]
+                                  "supportedSchemaVersions":["automation-job-v2"]
                                 }
                                 """))
                 .andExpect(status().isOk())
@@ -166,7 +172,7 @@ class GenerationJobWorkerIntegrationTests {
         long firstSnapshotId = claimJson.at("/snapshots/0/snapshotId").asLong();
         long secondSnapshotId = claimJson.at("/snapshots/1/snapshotId").asLong();
 
-        mockMvc.perform(post("/api/v1/internal/generation-jobs/{jobId}/heartbeat", job.getId())
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/heartbeat", job.getId())
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -176,23 +182,16 @@ class GenerationJobWorkerIntegrationTests {
                                 """))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/internal/generation-jobs/{jobId}/submit", job.getId())
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "workerId":"worker-a",
-                                  "providerName":"fake-provider",
-                                  "promptVersion":"prompt-v1",
-                                  "schemaVersion":"automation-job-v1",
-                                  "draft":{
-                                    "title":"자동 초안",
-                                    "excerpt":"요약",
-                                    "contentMarkdown":"# 자동 초안\\n\\n본문",
-                                    "citationSnapshotIds":[%d,%d]
-                                  }
-                                }
-                                """.formatted(firstSnapshotId, secondSnapshotId)))
+                        .content(successSubmitBody(
+                                "worker-a",
+                                "prompt-v1",
+                                "자동 초안",
+                                "요약",
+                                "# 자동 초안\n\n본문",
+                                java.util.List.of(firstSnapshotId, secondSnapshotId))))
                 .andExpect(status().isAccepted());
 
         var storedJob = generationJobRepository.findById(job.getId()).orElseThrow();
@@ -207,40 +206,157 @@ class GenerationJobWorkerIntegrationTests {
     }
 
     @Test
+    void responseLossRetryReturnsCommittedTerminalWithoutRepeatingSideEffects() throws Exception {
+        var job = seedGenerationJob();
+        var claim = claim("worker-retry");
+        var firstSnapshotId = claim.at("/snapshots/0/snapshotId").asLong();
+        var secondSnapshotId = claim.at("/snapshots/1/snapshotId").asLong();
+        var body = successSubmitBody(
+                "worker-retry",
+                "prompt-v1",
+                "Idempotent draft",
+                "Summary",
+                "# Idempotent draft\n\nBody",
+                java.util.List.of(firstSnapshotId, secondSnapshotId));
+
+        var firstResponse = mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isAccepted())
+                .andReturn();
+        var retryResponse = mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isAccepted())
+                .andReturn();
+
+        assertThat(jsonBody(retryResponse)).isEqualTo(jsonBody(firstResponse));
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post_revision", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_entry WHERE action_type = 'GENERATION_JOB_SUBMITTED'",
+                Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    void acceptsThePrecomputedTypeScriptCanonicalDigestFixtureWithoutJavaRewriting() throws Exception {
+        var job = seedGenerationJob();
+        claim("worker-fixture");
+        var fixture = contractFixture("failure-submit-request.json");
+
+        var response = mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(fixture))
+                .andExpect(status().isAccepted())
+                .andReturn();
+
+        assertThat(jsonBody(response).get("payloadDigest").asText())
+                .isEqualTo("af7e88f4a9643d9516482d22854cb46f97d1b0119c4aacca2e67a5a085b9f1e1");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT terminal_payload_digest FROM generation_job WHERE id = ?",
+                String.class,
+                job.getId()))
+                .isEqualTo("af7e88f4a9643d9516482d22854cb46f97d1b0119c4aacca2e67a5a085b9f1e1");
+    }
+
+    @Test
+    void rejectsDigestMismatchAndDifferentTerminalAfterSuccess() throws Exception {
+        var job = seedGenerationJob();
+        var claim = claim("worker-conflict");
+        var firstSnapshotId = claim.at("/snapshots/0/snapshotId").asLong();
+        var secondSnapshotId = claim.at("/snapshots/1/snapshotId").asLong();
+        var successBody = successSubmitBody(
+                "worker-conflict",
+                "prompt-v1",
+                "Committed draft",
+                "Summary",
+                "# Committed draft\n\nBody",
+                java.util.List.of(firstSnapshotId, secondSnapshotId));
+
+        var digestMismatch = (tools.jackson.databind.node.ObjectNode) objectMapper.readTree(successBody);
+        digestMismatch.withObject("/draft").put("title", "Tampered after digest");
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(digestMismatch)))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(successBody))
+                .andExpect(status().isAccepted());
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(failureSubmitBody("worker-conflict", "prompt-v1", "different terminal")))
+                .andExpect(status().isConflict());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_entry WHERE action_type = 'GENERATION_JOB_SUBMITTED'",
+                Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    void rejectsOversizedAndDeeplyInvalidWorkerSubmissionsBeforePublication() throws Exception {
+        var oversizedBody = "{\"padding\":\"" + "x".repeat(WorkerRequestSizeFilter.MAX_BODY_BYTES) + "\"}";
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/1/submit")
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(oversizedBody))
+                .andExpect(status().isPayloadTooLarge());
+
+        var job = seedGenerationJob();
+        claim("worker-invalid");
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(successSubmitBody(
+                                "worker-invalid",
+                                "prompt-v1",
+                                "Invalid citation",
+                                "Summary",
+                                "Body",
+                                java.util.List.of(0L))))
+                .andExpect(status().isBadRequest());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM audit_entry WHERE action_type = 'GENERATION_JOB_SUBMITTED'", Integer.class)).isZero();
+    }
+
+    @Test
     void holdsPublicationWhenOnlyOneIndependentSourceIsProvided() throws Exception {
         var job = seedSingleSourceGenerationJob();
 
-        var claimResult = mockMvc.perform(post("/api/v1/internal/generation-jobs/claim")
+        var claimResult = mockMvc.perform(post("/api/v2/internal/generation-jobs/claim")
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "workerId":"worker-a",
                                   "supportedProviders":["fake-provider"],
-                                  "supportedSchemaVersions":["automation-job-v1"]
+                                  "supportedSchemaVersions":["automation-job-v2"]
                                 }
                                 """))
                 .andExpect(status().isOk())
                 .andReturn();
         long snapshotId = jsonBody(claimResult).at("/snapshots/0/snapshotId").asLong();
 
-        mockMvc.perform(post("/api/v1/internal/generation-jobs/{jobId}/submit", job.getId())
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "workerId":"worker-a",
-                                  "providerName":"fake-provider",
-                                  "promptVersion":"prompt-v1",
-                                  "schemaVersion":"automation-job-v1",
-                                  "draft":{
-                                    "title":"단일 출처 초안",
-                                    "excerpt":"요약",
-                                    "contentMarkdown":"# 단일 출처 초안\\n\\n본문",
-                                    "citationSnapshotIds":[%d]
-                                  }
-                                }
-                                """.formatted(snapshotId)))
+                        .content(successSubmitBody(
+                                "worker-a",
+                                "prompt-v1",
+                                "단일 출처 초안",
+                                "요약",
+                                "# 단일 출처 초안\n\n본문",
+                                java.util.List.of(snapshotId))))
                 .andExpect(status().isAccepted());
 
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isZero();
@@ -254,47 +370,31 @@ class GenerationJobWorkerIntegrationTests {
     void rejectsSubmitFromAnotherWorkerOrExpiredLease() throws Exception {
         var job = seedGenerationJob();
 
-        mockMvc.perform(post("/api/v1/internal/generation-jobs/claim")
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/claim")
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "workerId":"worker-a",
                                   "supportedProviders":["fake-provider"],
-                                  "supportedSchemaVersions":["automation-job-v1"]
+                                  "supportedSchemaVersions":["automation-job-v2"]
                                 }
                                 """))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/internal/generation-jobs/{jobId}/submit", job.getId())
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "workerId":"worker-b",
-                                  "providerName":"fake-provider",
-                                  "promptVersion":"prompt-v1",
-                                  "schemaVersion":"automation-job-v1",
-                                  "failureReason":"other worker"
-                                }
-                                """))
-                .andExpect(status().isBadRequest());
+                        .content(failureSubmitBody("worker-b", "prompt-v1", "other worker")))
+                .andExpect(status().isConflict());
 
         jdbcTemplate.update("UPDATE generation_job SET lease_expires_at = '2026-06-28 00:00:00.000000' WHERE id = ?", job.getId());
 
-        mockMvc.perform(post("/api/v1/internal/generation-jobs/{jobId}/submit", job.getId())
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "workerId":"worker-a",
-                                  "providerName":"fake-provider",
-                                  "promptVersion":"prompt-v1",
-                                  "schemaVersion":"automation-job-v1",
-                                  "failureReason":"lease expired"
-                                }
-                                """))
-                .andExpect(status().isBadRequest());
+                        .content(failureSubmitBody("worker-a", "prompt-v1", "lease expired")))
+                .andExpect(status().isConflict());
     }
 
     @Test
@@ -304,14 +404,14 @@ class GenerationJobWorkerIntegrationTests {
                 "UPDATE automation_run SET lease_expires_at = UTC_TIMESTAMP(6) + INTERVAL 30 SECOND WHERE id = ?",
                 job.getRunId());
 
-        var claimResult = mockMvc.perform(post("/api/v1/internal/generation-jobs/claim")
+        var claimResult = mockMvc.perform(post("/api/v2/internal/generation-jobs/claim")
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "workerId":"worker-a",
                                   "supportedProviders":["fake-provider"],
-                                  "supportedSchemaVersions":["automation-job-v1"]
+                                  "supportedSchemaVersions":["automation-job-v2"]
                                 }
                                 """))
                 .andExpect(status().isOk())
@@ -320,10 +420,10 @@ class GenerationJobWorkerIntegrationTests {
                 "SELECT lease_expires_at FROM automation_run WHERE id = ?",
                 java.time.LocalDateTime.class,
                 job.getRunId());
-        assertThat(java.time.LocalDateTime.parse(jsonBody(claimResult).get("leaseExpiresAt").asText()))
-                .isEqualTo(runDeadline);
+        assertThat(java.time.Instant.parse(jsonBody(claimResult).get("leaseExpiresAt").asText()))
+                .isEqualTo(runDeadline.toInstant(java.time.ZoneOffset.UTC));
 
-        var heartbeatResult = mockMvc.perform(post("/api/v1/internal/generation-jobs/{jobId}/heartbeat", job.getId())
+        var heartbeatResult = mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/heartbeat", job.getId())
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -331,21 +431,23 @@ class GenerationJobWorkerIntegrationTests {
                                 """))
                 .andExpect(status().isOk())
                 .andReturn();
-        assertThat(java.time.LocalDateTime.parse(jsonBody(heartbeatResult).get("leaseExpiresAt").asText()))
-                .isEqualTo(runDeadline);
+        assertThat(java.time.Instant.parse(jsonBody(heartbeatResult).get("leaseExpiresAt").asText()))
+                .isEqualTo(runDeadline.toInstant(java.time.ZoneOffset.UTC));
+        assertThat(java.time.Instant.parse(jsonBody(heartbeatResult).get("serverTime").asText()))
+                .isBeforeOrEqualTo(java.time.Instant.parse(jsonBody(heartbeatResult).get("leaseExpiresAt").asText()));
     }
 
     @Test
     void rejectsLateWorkerSubmissionAfterRunRecovery() throws Exception {
         var job = seedGenerationJob();
-        mockMvc.perform(post("/api/v1/internal/generation-jobs/claim")
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/claim")
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "workerId":"worker-a",
                                   "supportedProviders":["fake-provider"],
-                                  "supportedSchemaVersions":["automation-job-v1"]
+                                  "supportedSchemaVersions":["automation-job-v2"]
                                 }
                                 """))
                 .andExpect(status().isOk());
@@ -354,19 +456,11 @@ class GenerationJobWorkerIntegrationTests {
                 job.getRunId());
         assertThat(automationRunRecoveryService.recoverExpiredRuns()).isEqualTo(1);
 
-        mockMvc.perform(post("/api/v1/internal/generation-jobs/{jobId}/submit", job.getId())
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "workerId":"worker-a",
-                                  "providerName":"fake-provider",
-                                  "promptVersion":"prompt-v1",
-                                  "schemaVersion":"automation-job-v1",
-                                  "failureReason":"late result"
-                                }
-                                """))
-                .andExpect(status().isBadRequest());
+                        .content(failureSubmitBody("worker-a", "prompt-v1", "late result")))
+                .andExpect(status().isConflict());
 
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT job_status FROM generation_job WHERE id = ?", String.class, job.getId())).isEqualTo("CANCELLED");
@@ -378,30 +472,22 @@ class GenerationJobWorkerIntegrationTests {
     void rejectsSubmissionWhenPromptVersionDoesNotMatchClaimedContract() throws Exception {
         var job = seedGenerationJob();
 
-        mockMvc.perform(post("/api/v1/internal/generation-jobs/claim")
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/claim")
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
                                   "workerId":"worker-a",
                                   "supportedProviders":["fake-provider"],
-                                  "supportedSchemaVersions":["automation-job-v1"]
+                                  "supportedSchemaVersions":["automation-job-v2"]
                                 }
                                 """))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/internal/generation-jobs/{jobId}/submit", job.getId())
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("""
-                                {
-                                  "workerId":"worker-a",
-                                  "providerName":"fake-provider",
-                                  "promptVersion":"unexpected-prompt-version",
-                                  "schemaVersion":"automation-job-v1",
-                                  "failureReason":"provider failed"
-                                }
-                                """))
+                        .content(failureSubmitBody("worker-a", "unexpected-prompt-version", "provider failed")))
                 .andExpect(status().isBadRequest());
 
         assertThat(jdbcTemplate.queryForObject(
@@ -413,7 +499,7 @@ class GenerationJobWorkerIntegrationTests {
     void returnsNoContentWhenNoCompatibleJobExists() throws Exception {
         seedGenerationJob();
 
-        mockMvc.perform(post("/api/v1/internal/generation-jobs/claim")
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/claim")
                         .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -490,7 +576,7 @@ class GenerationJobWorkerIntegrationTests {
                 new GenerationJobClaimRequest(
                         "worker-active",
                         java.util.List.of("fake-provider"),
-                        java.util.List.of("automation-job-v1")));
+                        java.util.List.of("automation-job-v2")));
 
         assertThat(claim).isNotNull();
         assertThat(claim.jobId()).isEqualTo(activeJob.getId());
@@ -509,7 +595,7 @@ class GenerationJobWorkerIntegrationTests {
                 new GenerationJobClaimRequest(
                         workerId,
                         java.util.List.of("fake-provider"),
-                        java.util.List.of("automation-job-v1")));
+                        java.util.List.of("automation-job-v2")));
     }
 
     private GenerationJob seedGenerationJob() {
@@ -549,6 +635,79 @@ class GenerationJobWorkerIntegrationTests {
 
     private String workerToken() {
         return "worker-test-token";
+    }
+
+    private JsonNode claim(String workerId) throws Exception {
+        var result = mockMvc.perform(post("/api/v2/internal/generation-jobs/claim")
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "workerId":"%s",
+                                  "supportedProviders":["fake-provider"],
+                                  "supportedSchemaVersions":["automation-job-v2"]
+                                }
+                                """.formatted(workerId)))
+                .andExpect(status().isOk())
+                .andReturn();
+        return jsonBody(result);
+    }
+
+    private String successSubmitBody(
+            String workerId,
+            String promptVersion,
+            String title,
+            String excerpt,
+            String contentMarkdown,
+            java.util.List<Long> citationSnapshotIds) throws Exception {
+        var requestWithoutDigest = new GenerationJobSubmitRequest(
+                UUID.randomUUID().toString(),
+                "0".repeat(64),
+                workerId,
+                "fake-provider",
+                promptVersion,
+                "automation-job-v2",
+                new GenerationJobSubmitRequest.GeneratedDraft(
+                        title,
+                        excerpt,
+                        contentMarkdown,
+                        citationSnapshotIds),
+                null);
+        return objectMapper.writeValueAsString(withCanonicalDigest(requestWithoutDigest));
+    }
+
+    private String failureSubmitBody(String workerId, String promptVersion, String failureReason) throws Exception {
+        var requestWithoutDigest = new GenerationJobSubmitRequest(
+                UUID.randomUUID().toString(),
+                "0".repeat(64),
+                workerId,
+                "fake-provider",
+                promptVersion,
+                "automation-job-v2",
+                null,
+                failureReason);
+        return objectMapper.writeValueAsString(withCanonicalDigest(requestWithoutDigest));
+    }
+
+    private GenerationJobSubmitRequest withCanonicalDigest(GenerationJobSubmitRequest request) {
+        return new GenerationJobSubmitRequest(
+                request.terminalSubmissionId(),
+                terminalPayloadDigester.digest(request),
+                request.workerId(),
+                request.providerName(),
+                request.promptVersion(),
+                request.schemaVersion(),
+                request.draft(),
+                request.failureReason());
+    }
+
+    private String contractFixture(String name) throws Exception {
+        var root = Path.of(System.getProperty("user.dir"));
+        var contracts = root.resolve("contracts");
+        if (!Files.isDirectory(contracts)) {
+            contracts = root.resolve("..").resolve("contracts").normalize();
+        }
+        return Files.readString(contracts.resolve("automation/v2/fixtures").resolve(name));
     }
 
     private void stubAccessibleSource(String path, String canonicalUrl) {

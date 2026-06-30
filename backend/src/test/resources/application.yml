@@ -80,7 +80,7 @@ app:
       shared-token: worker-test-token
       lease-duration: PT5M
       preferred-provider: fake-provider
-      schema-version: automation-job-v1
+      schema-version: automation-job-v2
     revalidation:
       base-url: ""
       shared-secret: revalidation-test-secret

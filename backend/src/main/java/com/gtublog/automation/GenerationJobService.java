@@ -11,6 +11,7 @@ import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,7 @@ public class GenerationJobService {
     private final PlatformMetricsService platformMetricsService;
     private final ObjectMapper objectMapper;
     private final Clock clock;
+    private final TerminalPayloadDigester terminalPayloadDigester;
 
     public GenerationJobService(
             GenerationJobRepository generationJobRepository,
@@ -45,7 +47,8 @@ public class GenerationJobService {
             AutomationPublicationService automationPublicationService,
             PlatformMetricsService platformMetricsService,
             ObjectMapper objectMapper,
-            Clock clock) {
+            Clock clock,
+            TerminalPayloadDigester terminalPayloadDigester) {
         this.generationJobRepository = generationJobRepository;
         this.sourceSnapshotRepository = sourceSnapshotRepository;
         this.automationTopicRepository = automationTopicRepository;
@@ -56,6 +59,7 @@ public class GenerationJobService {
         this.platformMetricsService = platformMetricsService;
         this.objectMapper = objectMapper;
         this.clock = clock;
+        this.terminalPayloadDigester = terminalPayloadDigester;
     }
 
     @Transactional
@@ -120,7 +124,11 @@ public class GenerationJobService {
                 .orElseThrow(() -> new NoSuchElementException("Generation job not found."));
         var run = automationRunRepository.findByIdForUpdate(runId)
                 .orElseThrow(() -> new NoSuchElementException("Automation run not found."));
-        run.requireActive(now);
+        try {
+            run.requireActive(now);
+        } catch (IllegalStateException exception) {
+            throw new GenerationLeaseLostException("The automation run is no longer active.");
+        }
         var job = generationJobRepository.findByIdForUpdate(jobId)
                 .orElseThrow(() -> new NoSuchElementException("Generation job not found."));
         var leaseExpiresAt = cappedWorkerLease(now, run);
@@ -132,7 +140,11 @@ public class GenerationJobService {
                 jobId.toString(),
                 "GENERATION_JOB_HEARTBEAT",
                 Map.of("leaseExpiresAt", leaseExpiresAt.toString()));
-        return new GenerationJobHeartbeatResponse(job.getId(), job.getJobStatus().name(), leaseExpiresAt);
+        return new GenerationJobHeartbeatResponse(
+                job.getId(),
+                job.getJobStatus().name(),
+                clock.instant(),
+                leaseExpiresAt.toInstant(ZoneOffset.UTC));
     }
 
     @Transactional
@@ -141,22 +153,37 @@ public class GenerationJobService {
             Long jobId,
             GenerationJobSubmitRequest request) {
         authorize(workerToken);
+        var now = now();
         var runId = generationJobRepository.findRunIdById(jobId)
                 .orElseThrow(() -> new NoSuchElementException("Generation job not found."));
-        var now = now();
         var run = automationRunRepository.findByIdForUpdate(runId)
                 .orElseThrow(() -> new NoSuchElementException("Automation run not found."));
-        run.requireActive(now);
         var job = generationJobRepository.findByIdForUpdate(jobId)
                 .orElseThrow(() -> new NoSuchElementException("Generation job not found."));
+        var canonicalDigest = terminalPayloadDigester.digest(request);
+        if (!MessageDigest.isEqual(canonicalDigest.getBytes(StandardCharsets.US_ASCII), request.payloadDigest().getBytes(StandardCharsets.US_ASCII))) {
+            throw new TerminalSubmissionConflictException("Terminal payload digest does not match the canonical payload.");
+        }
+        if (job.getTerminalSubmissionId() != null) {
+            if (job.getTerminalSubmissionId().equals(request.terminalSubmissionId())
+                    && job.getTerminalPayloadDigest().equals(canonicalDigest)) {
+                return submitResponse(job);
+            }
+            throw new TerminalSubmissionConflictException("A different terminal result is already committed for this job.");
+        }
         if (!job.getProviderName().equals(request.providerName())
                 || !job.getPromptVersion().equals(request.promptVersion())
                 || !job.getSchemaVersion().equals(request.schemaVersion())) {
             throw new IllegalArgumentException("The generation job contract does not match this worker submission.");
         }
+        try {
+            run.requireActive(now);
+        } catch (IllegalStateException exception) {
+            throw new GenerationLeaseLostException("The automation run is no longer active.");
+        }
 
         if (request.failureReason() != null && !request.failureReason().isBlank()) {
-            job.fail(request.workerId(), request.failureReason(), now);
+            job.fail(request.workerId(), request.terminalSubmissionId(), canonicalDigest, request.failureReason(), now);
             run.markFailed(request.failureReason(), now);
             platformMetricsService.recordGenerationJobEvent("failed");
             auditService.record(
@@ -166,13 +193,13 @@ public class GenerationJobService {
                     jobId.toString(),
                     "GENERATION_JOB_FAILED",
                     Map.of("failureReason", request.failureReason()));
-            return new GenerationJobSubmitResponse(job.getId(), job.getJobStatus().name(), job.getSubmittedAt());
+            return submitResponse(job);
         }
 
         if (request.draft() == null) {
             throw new IllegalArgumentException("A successful generation submission must include a draft payload.");
         }
-        job.submit(request.workerId(), toJson(Map.of(
+        job.submit(request.workerId(), request.terminalSubmissionId(), canonicalDigest, toJson(Map.of(
                 "title", request.draft().title(),
                 "excerpt", request.draft().excerpt(),
                 "contentMarkdown", request.draft().contentMarkdown(),
@@ -198,7 +225,7 @@ public class GenerationJobService {
                 jobId.toString(),
                 "GENERATION_JOB_SUBMITTED",
                 auditDetail);
-        return new GenerationJobSubmitResponse(job.getId(), job.getJobStatus().name(), job.getSubmittedAt());
+        return submitResponse(job);
     }
 
     @Transactional(readOnly = true)
@@ -228,7 +255,7 @@ public class GenerationJobService {
                         (String) snapshot.get("originHost"),
                         (String) snapshot.get("bodyExcerpt"),
                         (String) snapshot.get("contentHash"),
-                        LocalDateTime.parse((String) snapshot.get("retrievedAt"))))
+                        LocalDateTime.parse((String) snapshot.get("retrievedAt")).toInstant(ZoneOffset.UTC)))
                 .toList();
         return new GenerationJobClaimResponse(
                 job.getId(),
@@ -236,7 +263,7 @@ public class GenerationJobService {
                 runId,
                 topicId,
                 job.getLeaseOwner(),
-                job.getLeaseExpiresAt(),
+                job.getLeaseExpiresAt().toInstant(ZoneOffset.UTC),
                 job.getProviderName(),
                 job.getPromptVersion(),
                 job.getSchemaVersion(),
@@ -304,7 +331,13 @@ public class GenerationJobService {
     }
 
     private LocalDateTime now() {
-        return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+        return LocalDateTime.ofInstant(clock.instant().truncatedTo(ChronoUnit.MICROS), ZoneOffset.UTC);
+    }
+
+    private GenerationJobSubmitResponse submitResponse(GenerationJob job) {
+        return new GenerationJobSubmitResponse(
+                job.getId(), job.getJobStatus().name(), job.getSubmittedAt().toInstant(ZoneOffset.UTC),
+                job.getTerminalSubmissionId(), job.getTerminalPayloadDigest());
     }
 
     private LocalDateTime cappedWorkerLease(LocalDateTime now, AutomationRun run) {

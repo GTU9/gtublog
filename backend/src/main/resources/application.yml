@@ -63,7 +63,7 @@ app:
       shared-token: ${AUTOMATION_WORKER_SHARED_TOKEN:}
       lease-duration: ${AUTOMATION_WORKER_LEASE_DURATION:PT5M}
       preferred-provider: ${AUTOMATION_WORKER_PROVIDER:codex-sdk}
-      schema-version: ${AUTOMATION_WORKER_SCHEMA_VERSION:automation-job-v1}
+      schema-version: ${AUTOMATION_WORKER_SCHEMA_VERSION:automation-job-v2}
     revalidation:
       base-url: ${AUTOMATION_REVALIDATION_BASE_URL:}
       shared-secret: ${AUTOMATION_REVALIDATION_SHARED_SECRET:}

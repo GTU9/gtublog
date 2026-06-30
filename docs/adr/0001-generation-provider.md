@@ -1,6 +1,6 @@
 # ADR 0001: Keep Codex SDK as the preferred conditional adapter
 
-- Status: Accepted; production freeze deferred to Story 8 gate
+- Status: Accepted conditionally; production adapter remains frozen pending the clean-container canary
 - Date: 2026-06-29
 - Decision owner: backend publication boundary
 
@@ -14,7 +14,7 @@ The official TypeScript package `@openai/codex-sdk` supports programmatic server
 
 Keep `@openai/codex-sdk` as the preferred conditional adapter candidate behind the injected `GenerationProvider` boundary. The local authenticated-session spike approves SDK/runtime feasibility only. It does not freeze Codex SDK as the production adapter because an externally supplied unattended credential and restartable deployment environment were not available during Phase 0.
 
-Story 8 must implement and verify all of the following before production use:
+The runnable-worker gate must implement and verify all of the following before production use:
 
 1. unattended authentication uses an externally supplied, rotatable credential;
 2. the worker runs in an isolated workspace with bounded time and resources;
@@ -31,7 +31,7 @@ Phase 0 is not blocked by the missing unattended authentication and deployment p
 - Codex App automation may be an optional operator convenience, never the scheduler of record.
 - Provider substitution does not change Spring APIs, evidence storage, or publication rules.
 - Local SDK feasibility is reproducible with `pnpm --dir generation-worker spike:codex` while an authenticated Codex session is available.
-- Production readiness still requires contract, credential, timeout, lease, isolation, and deployment evidence in Story 8.
+- The v2 contract, credential, timeout, lease, and deployment boundaries are implemented. Production readiness remains blocked until a clean-container, two-restart canary proves API-key and worker-token non-disclosure from model-invoked tools.
 
 ## References
 

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gtublog.dev/contracts/automation/v2/submit-response.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["jobId", "status", "submittedAt", "terminalSubmissionId", "payloadDigest"],
+  "properties": {
+    "jobId": { "type": "integer", "minimum": 1 },
+    "status": { "type": "string", "minLength": 1, "maxLength": 32 },
+    "submittedAt": { "type": "string", "format": "date-time" },
+    "terminalSubmissionId": { "type": "string", "format": "uuid" },
+    "payloadDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+  }
+}
