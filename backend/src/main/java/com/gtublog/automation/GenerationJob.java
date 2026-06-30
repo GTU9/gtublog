@@ -7,6 +7,7 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -212,8 +213,29 @@ public class GenerationJob extends BaseEntity {
         clearLease();
     }
 
+    public void cancelForExpiredRun(String reason, LocalDateTime now) {
+        if (jobStatus != GenerationJobStatus.PENDING && jobStatus != GenerationJobStatus.CLAIMED) {
+            return;
+        }
+        this.jobStatus = GenerationJobStatus.CANCELLED;
+        this.failureReason = reason;
+        this.submittedAt = now;
+        clearLease();
+    }
+
     public boolean leaseExpired(LocalDateTime now) {
-        return leaseExpiresAt != null && leaseExpiresAt.isBefore(now);
+        return leaseExpiresAt != null && !leaseExpiresAt.isAfter(now);
+    }
+
+    public boolean isClaimable(
+            LocalDateTime now,
+            Collection<String> supportedProviders,
+            Collection<String> supportedSchemaVersions) {
+        boolean available = jobStatus == GenerationJobStatus.PENDING
+                || (jobStatus == GenerationJobStatus.CLAIMED && leaseExpired(now));
+        return available
+                && supportedProviders.contains(providerName)
+                && supportedSchemaVersions.contains(schemaVersion);
     }
 
     private void requireLeaseOwner(String workerId, LocalDateTime now) {

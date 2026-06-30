@@ -14,6 +14,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
@@ -23,6 +24,48 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import org.junit.jupiter.api.Test;
 
 class PinnedSourceHttpClientTests {
+
+    @Test
+    void enforcesOneDeadlineAcrossAnEntireRedirectChain() throws Exception {
+        try (var firstServer = new ServerSocket(0);
+                var secondServer = new ServerSocket(0);
+                var executor = Executors.newFixedThreadPool(2)) {
+            executor.submit(() -> {
+                try (var socket = firstServer.accept()) {
+                    consumeRequest(socket);
+                    Thread.sleep(120);
+                    socket.getOutputStream().write(("HTTP/1.1 302 Found\r\nLocation: http://second.invalid:"
+                                    + secondServer.getLocalPort()
+                                    + "/final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                            .getBytes(StandardCharsets.US_ASCII));
+                    socket.getOutputStream().flush();
+                }
+                return null;
+            });
+            executor.submit(() -> {
+                try (var socket = secondServer.accept()) {
+                    consumeRequest(socket);
+                    Thread.sleep(120);
+                    byte[] body = "too late".getBytes(StandardCharsets.UTF_8);
+                    socket.getOutputStream().write(("HTTP/1.1 200 OK\r\nContent-Length: " + body.length
+                                    + "\r\nConnection: close\r\n\r\n")
+                            .getBytes(StandardCharsets.US_ASCII));
+                    socket.getOutputStream().write(body);
+                    socket.getOutputStream().flush();
+                }
+                return null;
+            });
+
+            var resolver = (SourceUrlPolicy.AddressResolver) host -> new InetAddress[] {InetAddress.getLoopbackAddress()};
+            var policy = new SourceUrlPolicy(Set.of("first.invalid", "second.invalid"), resolver);
+            var client = new PinnedSourceHttpClient(Duration.ofMillis(100), Duration.ofMillis(180));
+            var service = new SourceCollectionService(null, null, policy, client);
+
+            assertThatThrownBy(() -> service.fetch("http://first.invalid:" + firstServer.getLocalPort() + "/start"))
+                    .isInstanceOf(java.io.IOException.class)
+                    .hasMessageContaining("timed out");
+        }
+    }
 
     @Test
     void rejectsTlsCertificateThatDoesNotMatchTheOriginalHostname() throws Exception {
@@ -78,6 +121,13 @@ class PinnedSourceHttpClientTests {
 
             assertThat(new String(response.body(), StandardCharsets.UTF_8)).isEqualTo("pinned response");
             assertThat(hostHeader.get()).isEqualTo("dns-rebind.invalid:" + server.getLocalPort());
+        }
+    }
+
+    private void consumeRequest(java.net.Socket socket) throws Exception {
+        var reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+        while (!reader.readLine().isEmpty()) {
+            // Consume the request.
         }
     }
 

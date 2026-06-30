@@ -30,6 +30,12 @@ import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.LocalDateTime;
+import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
 @Tag("docker")
 @SpringBootTest
 class GenerationJobWorkerIntegrationTests {
@@ -87,6 +93,15 @@ class GenerationJobWorkerIntegrationTests {
 
     @Autowired
     private GenerationJobRepository generationJobRepository;
+
+    @Autowired
+    private AutomationRunRepository automationRunRepository;
+
+    @Autowired
+    private GenerationJobService generationJobService;
+
+    @Autowired
+    private AutomationRunRecoveryService automationRunRecoveryService;
 
     @Autowired
     void configureMockMvc(WebApplicationContext context) {
@@ -283,6 +298,83 @@ class GenerationJobWorkerIntegrationTests {
     }
 
     @Test
+    void workerLeaseNeverExtendsPastTheRunDeadline() throws Exception {
+        var job = seedGenerationJob();
+        jdbcTemplate.update(
+                "UPDATE automation_run SET lease_expires_at = UTC_TIMESTAMP(6) + INTERVAL 30 SECOND WHERE id = ?",
+                job.getRunId());
+
+        var claimResult = mockMvc.perform(post("/api/v1/internal/generation-jobs/claim")
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "workerId":"worker-a",
+                                  "supportedProviders":["fake-provider"],
+                                  "supportedSchemaVersions":["automation-job-v1"]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        var runDeadline = jdbcTemplate.queryForObject(
+                "SELECT lease_expires_at FROM automation_run WHERE id = ?",
+                java.time.LocalDateTime.class,
+                job.getRunId());
+        assertThat(java.time.LocalDateTime.parse(jsonBody(claimResult).get("leaseExpiresAt").asText()))
+                .isEqualTo(runDeadline);
+
+        var heartbeatResult = mockMvc.perform(post("/api/v1/internal/generation-jobs/{jobId}/heartbeat", job.getId())
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"workerId":"worker-a"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        assertThat(java.time.LocalDateTime.parse(jsonBody(heartbeatResult).get("leaseExpiresAt").asText()))
+                .isEqualTo(runDeadline);
+    }
+
+    @Test
+    void rejectsLateWorkerSubmissionAfterRunRecovery() throws Exception {
+        var job = seedGenerationJob();
+        mockMvc.perform(post("/api/v1/internal/generation-jobs/claim")
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "workerId":"worker-a",
+                                  "supportedProviders":["fake-provider"],
+                                  "supportedSchemaVersions":["automation-job-v1"]
+                                }
+                                """))
+                .andExpect(status().isOk());
+        jdbcTemplate.update(
+                "UPDATE automation_run SET lease_expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND WHERE id = ?",
+                job.getRunId());
+        assertThat(automationRunRecoveryService.recoverExpiredRuns()).isEqualTo(1);
+
+        mockMvc.perform(post("/api/v1/internal/generation-jobs/{jobId}/submit", job.getId())
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "workerId":"worker-a",
+                                  "providerName":"fake-provider",
+                                  "promptVersion":"prompt-v1",
+                                  "schemaVersion":"automation-job-v1",
+                                  "failureReason":"late result"
+                                }
+                                """))
+                .andExpect(status().isBadRequest());
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT job_status FROM generation_job WHERE id = ?", String.class, job.getId())).isEqualTo("CANCELLED");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class)).isZero();
+    }
+
+    @Test
     void rejectsSubmissionWhenPromptVersionDoesNotMatchClaimedContract() throws Exception {
         var job = seedGenerationJob();
 
@@ -332,6 +424,92 @@ class GenerationJobWorkerIntegrationTests {
                                 }
                                 """))
                 .andExpect(status().isNoContent());
+    }
+
+    @Test
+    void concurrentWorkersCannotBothClaimTheSameJob() throws Exception {
+        var job = seedGenerationJob();
+        var ready = new CountDownLatch(2);
+        var start = new CountDownLatch(1);
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            var first = executor.submit(() -> claimAfterBarrier("worker-a", ready, start));
+            var second = executor.submit(() -> claimAfterBarrier("worker-b", ready, start));
+            assertThat(ready.await(10, TimeUnit.SECONDS)).isTrue();
+            start.countDown();
+
+            var claims = java.util.stream.Stream.of(
+                            first.get(10, TimeUnit.SECONDS),
+                            second.get(10, TimeUnit.SECONDS))
+                    .filter(java.util.Objects::nonNull)
+                    .toList();
+
+            assertThat(claims).singleElement().extracting(GenerationJobClaimResponse::jobId).isEqualTo(job.getId());
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM audit_entry WHERE action_type = 'GENERATION_JOB_CLAIMED'",
+                    Integer.class)).isEqualTo(1);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT lease_owner FROM generation_job WHERE id = ?",
+                    String.class,
+                    job.getId())).isIn("worker-a", "worker-b");
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void expiredRunsCannotStarveAnActiveClaimBehindTheCandidatePage() {
+        var activeJob = seedGenerationJob();
+        var activeRun = automationRunRepository.findById(activeJob.getRunId()).orElseThrow();
+        var now = LocalDateTime.now(java.time.Clock.systemUTC());
+
+        for (int index = 0; index < 11; index++) {
+            var staleRun = automationRunRepository.saveAndFlush(AutomationRun.start(
+                    UUID.randomUUID().toString(),
+                    activeRun.getTopicId(),
+                    null,
+                    "MANUAL",
+                    "stale-claim-" + index,
+                    "pipeline",
+                    now.minusMinutes(1),
+                    now.minusHours(2)));
+            var staleJob = generationJobRepository.saveAndFlush(GenerationJob.enqueue(
+                    UUID.randomUUID().toString(),
+                    staleRun.getId(),
+                    activeJob.getProviderName(),
+                    activeJob.getPromptVersion(),
+                    activeJob.getSchemaVersion(),
+                    activeJob.getRequestPayloadJson()));
+            jdbcTemplate.update(
+                    "UPDATE generation_job SET created_at = UTC_TIMESTAMP(6) - INTERVAL 1 DAY WHERE id = ?",
+                    staleJob.getId());
+        }
+
+        var claim = generationJobService.claim(
+                workerToken(),
+                new GenerationJobClaimRequest(
+                        "worker-active",
+                        java.util.List.of("fake-provider"),
+                        java.util.List.of("automation-job-v1")));
+
+        assertThat(claim).isNotNull();
+        assertThat(claim.jobId()).isEqualTo(activeJob.getId());
+    }
+
+    private GenerationJobClaimResponse claimAfterBarrier(
+            String workerId,
+            CountDownLatch ready,
+            CountDownLatch start) throws InterruptedException {
+        ready.countDown();
+        if (!start.await(10, TimeUnit.SECONDS)) {
+            throw new IllegalStateException("Claim race did not start in time.");
+        }
+        return generationJobService.claim(
+                workerToken(),
+                new GenerationJobClaimRequest(
+                        workerId,
+                        java.util.List.of("fake-provider"),
+                        java.util.List.of("automation-job-v1")));
     }
 
     private GenerationJob seedGenerationJob() {

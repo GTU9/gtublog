@@ -25,6 +25,20 @@ Recommended local verification steps:
 2. Restart the backend during or after outbox creation.
 3. Verify the run remains recoverable and pending outbox events can be replayed safely.
 4. Restart the generation worker and confirm the next compatible job can still be claimed.
+5. Force a test run lease into the past, execute the recovery sweep, and confirm the run becomes `FAILED`, its job becomes `CANCELLED`, and exactly one `AUTOMATION_RUN_RECOVERED_AS_FAILED` audit event exists.
+
+## Migration preflight
+
+Before applying `V6__automation_run_recovery.sql`, verify that historical generation jobs contain at most one row per run:
+
+```sql
+SELECT run_id, COUNT(*) AS job_count
+FROM generation_job
+GROUP BY run_id
+HAVING COUNT(*) > 1;
+```
+
+Resolve any returned rows through an audited operational decision before migration. The migration intentionally fails instead of deleting ambiguous job history.
 
 ## Release gate checklist
 

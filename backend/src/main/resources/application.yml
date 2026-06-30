@@ -19,6 +19,20 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+  quartz:
+    job-store-type: jdbc
+    jdbc:
+      initialize-schema: never
+    properties:
+      org:
+        quartz:
+          scheduler:
+            instanceName: GtuBlogScheduler
+            instanceId: AUTO
+          jobStore:
+            driverDelegateClass: org.quartz.impl.jdbcjobstore.StdJDBCDelegate
+            isClustered: true
+            tablePrefix: QRTZ_
 
 app:
   auth:
@@ -41,6 +55,10 @@ app:
   automation:
     collection:
       allowed-private-hosts: ${AUTOMATION_COLLECTION_ALLOWED_PRIVATE_HOSTS:}
+    run:
+      pipeline-lease-duration: ${AUTOMATION_RUN_PIPELINE_LEASE_DURATION:PT10M}
+      max-duration: ${AUTOMATION_RUN_MAX_DURATION:PT30M}
+      recovery-interval: ${AUTOMATION_RUN_RECOVERY_INTERVAL:PT1M}
     worker:
       shared-token: ${AUTOMATION_WORKER_SHARED_TOKEN:}
       lease-duration: ${AUTOMATION_WORKER_LEASE_DURATION:PT5M}

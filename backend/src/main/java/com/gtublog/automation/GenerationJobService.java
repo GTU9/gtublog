@@ -8,6 +8,7 @@ import com.gtublog.source.SourceSnapshot;
 import com.gtublog.source.SourceSnapshotRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
@@ -32,6 +33,7 @@ public class GenerationJobService {
     private final AutomationPublicationService automationPublicationService;
     private final PlatformMetricsService platformMetricsService;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
     public GenerationJobService(
             GenerationJobRepository generationJobRepository,
@@ -42,7 +44,8 @@ public class GenerationJobService {
             AuditService auditService,
             AutomationPublicationService automationPublicationService,
             PlatformMetricsService platformMetricsService,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            Clock clock) {
         this.generationJobRepository = generationJobRepository;
         this.sourceSnapshotRepository = sourceSnapshotRepository;
         this.automationTopicRepository = automationTopicRepository;
@@ -52,11 +55,16 @@ public class GenerationJobService {
         this.automationPublicationService = automationPublicationService;
         this.platformMetricsService = platformMetricsService;
         this.objectMapper = objectMapper;
+        this.clock = clock;
     }
 
     @Transactional
     public GenerationJob enqueueForRun(AutomationTopic topic, AutomationRun run, List<SourceSnapshot> snapshots) {
-        return generationJobRepository.findByRunId(run.getId()).orElseGet(() -> generationJobRepository.save(
+        var now = now();
+        var lockedRun = automationRunRepository.findByIdForUpdate(run.getId())
+                .orElseThrow(() -> new NoSuchElementException("Automation run not found."));
+        lockedRun.requireActive(now);
+        var job = generationJobRepository.findByRunIdForUpdate(run.getId()).orElseGet(() -> generationJobRepository.saveAndFlush(
                 GenerationJob.enqueue(
                         UUID.randomUUID().toString(),
                         run.getId(),
@@ -64,33 +72,41 @@ public class GenerationJobService {
                         topic.getPromptTemplateVersion(),
                         automationProperties.worker().schemaVersion(),
                         toJson(payload(topic, run, snapshots)))));
+        lockedRun.awaitGeneration(lockedRun.getStartedAt().plus(automationProperties.run().maxDuration()));
+        return job;
     }
 
     @Transactional
     public GenerationJobClaimResponse claim(String workerToken, GenerationJobClaimRequest request) {
         authorize(workerToken);
-        var jobs = generationJobRepository.findClaimableJobs(
-                LocalDateTime.now(ZoneOffset.UTC),
+        var now = now();
+        var candidates = generationJobRepository.findClaimableJobs(
+                now,
                 request.supportedProviders(),
                 request.supportedSchemaVersions(),
-                PageRequest.of(0, 1));
-        if (jobs.isEmpty()) {
-            return null;
+                PageRequest.of(0, 10));
+        for (var candidate : candidates) {
+            var run = automationRunRepository.findByIdForUpdate(candidate.getRunId()).orElse(null);
+            if (run == null || !run.isActive(now)) {
+                continue;
+            }
+            var job = generationJobRepository.findByIdForUpdate(candidate.getJobId()).orElse(null);
+            if (job == null || !job.isClaimable(now, request.supportedProviders(), request.supportedSchemaVersions())) {
+                continue;
+            }
+            var leaseExpiresAt = cappedWorkerLease(now, run);
+            job.claim(request.workerId(), leaseExpiresAt, now);
+            platformMetricsService.recordGenerationJobEvent("claimed");
+            auditService.record(
+                    AuditActorType.WORKER,
+                    request.workerId(),
+                    AuditTargetType.AUTOMATION,
+                    job.getId().toString(),
+                    "GENERATION_JOB_CLAIMED",
+                    Map.of("runId", job.getRunId()));
+            return toClaimResponse(job);
         }
-
-        var now = LocalDateTime.now(ZoneOffset.UTC);
-        var leaseExpiresAt = now.plus(automationProperties.worker().leaseDuration());
-        var job = jobs.getFirst();
-        job.claim(request.workerId(), leaseExpiresAt, now);
-        platformMetricsService.recordGenerationJobEvent("claimed");
-        auditService.record(
-                AuditActorType.WORKER,
-                request.workerId(),
-                AuditTargetType.AUTOMATION,
-                job.getId().toString(),
-                "GENERATION_JOB_CLAIMED",
-                Map.of("runId", job.getRunId()));
-        return toClaimResponse(job);
+        return null;
     }
 
     @Transactional
@@ -99,9 +115,15 @@ public class GenerationJobService {
             Long jobId,
             GenerationJobHeartbeatRequest request) {
         authorize(workerToken);
-        var now = LocalDateTime.now(ZoneOffset.UTC);
-        var leaseExpiresAt = now.plus(automationProperties.worker().leaseDuration());
-        var job = generationJobRepository.findById(jobId).orElseThrow(() -> new NoSuchElementException("Generation job not found."));
+        var now = now();
+        var runId = generationJobRepository.findRunIdById(jobId)
+                .orElseThrow(() -> new NoSuchElementException("Generation job not found."));
+        var run = automationRunRepository.findByIdForUpdate(runId)
+                .orElseThrow(() -> new NoSuchElementException("Automation run not found."));
+        run.requireActive(now);
+        var job = generationJobRepository.findByIdForUpdate(jobId)
+                .orElseThrow(() -> new NoSuchElementException("Generation job not found."));
+        var leaseExpiresAt = cappedWorkerLease(now, run);
         job.heartbeat(request.workerId(), leaseExpiresAt, now);
         auditService.record(
                 AuditActorType.WORKER,
@@ -119,8 +141,14 @@ public class GenerationJobService {
             Long jobId,
             GenerationJobSubmitRequest request) {
         authorize(workerToken);
-        var job = generationJobRepository.findById(jobId).orElseThrow(() -> new NoSuchElementException("Generation job not found."));
-        var now = LocalDateTime.now(ZoneOffset.UTC);
+        var runId = generationJobRepository.findRunIdById(jobId)
+                .orElseThrow(() -> new NoSuchElementException("Generation job not found."));
+        var now = now();
+        var run = automationRunRepository.findByIdForUpdate(runId)
+                .orElseThrow(() -> new NoSuchElementException("Automation run not found."));
+        run.requireActive(now);
+        var job = generationJobRepository.findByIdForUpdate(jobId)
+                .orElseThrow(() -> new NoSuchElementException("Generation job not found."));
         if (!job.getProviderName().equals(request.providerName())
                 || !job.getPromptVersion().equals(request.promptVersion())
                 || !job.getSchemaVersion().equals(request.schemaVersion())) {
@@ -129,7 +157,7 @@ public class GenerationJobService {
 
         if (request.failureReason() != null && !request.failureReason().isBlank()) {
             job.fail(request.workerId(), request.failureReason(), now);
-            automationRunRepository.findById(job.getRunId()).ifPresent(run -> run.markFailed(request.failureReason(), now));
+            run.markFailed(request.failureReason(), now);
             platformMetricsService.recordGenerationJobEvent("failed");
             auditService.record(
                     AuditActorType.WORKER,
@@ -150,7 +178,7 @@ public class GenerationJobService {
                 "contentMarkdown", request.draft().contentMarkdown(),
                 "citationSnapshotIds", request.draft().citationSnapshotIds() == null ? List.of() : request.draft().citationSnapshotIds())), now);
         platformMetricsService.recordGenerationJobEvent("submitted");
-        var publicationDecision = automationPublicationService.processSubmission(job, request);
+        var publicationDecision = automationPublicationService.processSubmission(job, run, request);
         var auditDetail = new LinkedHashMap<String, Object>();
         auditDetail.put("citationCount", request.draft().citationSnapshotIds() == null ? 0 : request.draft().citationSnapshotIds().size());
         auditDetail.put("published", publicationDecision.published());
@@ -273,5 +301,14 @@ public class GenerationJobService {
 
     private long longValue(Object value) {
         return ((Number) value).longValue();
+    }
+
+    private LocalDateTime now() {
+        return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+    }
+
+    private LocalDateTime cappedWorkerLease(LocalDateTime now, AutomationRun run) {
+        var workerLease = now.plus(automationProperties.worker().leaseDuration());
+        return workerLease.isBefore(run.getLeaseExpiresAt()) ? workerLease : run.getLeaseExpiresAt();
     }
 }

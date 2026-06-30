@@ -5,6 +5,7 @@ import com.gtublog.audit.AuditService;
 import com.gtublog.audit.AuditTargetType;
 import com.gtublog.observability.PlatformMetricsService;
 import java.time.LocalDateTime;
+import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -20,14 +21,20 @@ public class AutomationRunLifecycleService {
     private final AutomationRunRepository automationRunRepository;
     private final AuditService auditService;
     private final PlatformMetricsService platformMetricsService;
+    private final AutomationProperties automationProperties;
+    private final Clock clock;
 
     public AutomationRunLifecycleService(
             AutomationRunRepository automationRunRepository,
             AuditService auditService,
-            PlatformMetricsService platformMetricsService) {
+            PlatformMetricsService platformMetricsService,
+            AutomationProperties automationProperties,
+            Clock clock) {
         this.automationRunRepository = automationRunRepository;
         this.auditService = auditService;
         this.platformMetricsService = platformMetricsService;
+        this.automationProperties = automationProperties;
+        this.clock = clock;
     }
 
     @Transactional
@@ -41,7 +48,7 @@ public class AutomationRunLifecycleService {
             return new StartResult(existing.get(), false);
         }
 
-        var now = LocalDateTime.now(ZoneOffset.UTC);
+        var now = now();
         var run = automationRunRepository.saveAndFlush(AutomationRun.start(
                 UUID.randomUUID().toString(),
                 topicId,
@@ -49,7 +56,7 @@ public class AutomationRunLifecycleService {
                 triggerType,
                 idempotencyKey,
                 DEFAULT_LEASE_OWNER,
-                now.plusMinutes(10),
+                now.plus(automationProperties.run().pipelineLeaseDuration()),
                 now));
         auditService.record(
                 AuditActorType.ADMIN,
@@ -63,9 +70,11 @@ public class AutomationRunLifecycleService {
 
     @Transactional
     public void hold(Long runId, String holdReason) {
-        var run = automationRunRepository.findById(runId)
+        var run = automationRunRepository.findByIdForUpdate(runId)
                 .orElseThrow(() -> new NoSuchElementException("Automation run not found."));
-        run.markHeld(holdReason, LocalDateTime.now(ZoneOffset.UTC));
+        var now = now();
+        run.requireActive(now);
+        run.markHeld(holdReason, now);
         platformMetricsService.recordPublicationDecision("run_held", holdReason);
         auditService.record(
                 AuditActorType.ADMIN,
@@ -77,5 +86,9 @@ public class AutomationRunLifecycleService {
     }
 
     public record StartResult(AutomationRun run, boolean createdNew) {
+    }
+
+    private LocalDateTime now() {
+        return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
     }
 }

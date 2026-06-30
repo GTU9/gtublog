@@ -9,8 +9,32 @@ import org.springframework.validation.annotation.Validated;
 @Validated
 @ConfigurationProperties(prefix = "app.automation")
 public record AutomationProperties(
+        @NotNull RunProperties run,
         @NotNull WorkerProperties worker,
         @NotNull RevalidationProperties revalidation) {
+
+    public record RunProperties(
+            @NotNull Duration pipelineLeaseDuration,
+            @NotNull Duration maxDuration,
+            @NotNull Duration recoveryInterval) {
+
+        public RunProperties {
+            requirePositive(pipelineLeaseDuration, "pipelineLeaseDuration");
+            requirePositive(maxDuration, "maxDuration");
+            requirePositive(recoveryInterval, "recoveryInterval");
+            if (maxDuration != null
+                    && pipelineLeaseDuration != null
+                    && maxDuration.compareTo(pipelineLeaseDuration) < 0) {
+                throw new IllegalArgumentException("maxDuration must not be shorter than pipelineLeaseDuration.");
+            }
+        }
+
+        private static void requirePositive(Duration value, String name) {
+            if (value != null && value.compareTo(Duration.ofMillis(1)) < 0) {
+                throw new IllegalArgumentException(name + " must be at least one millisecond.");
+            }
+        }
+    }
 
     public record WorkerProperties(
             @NotBlank String sharedToken,

@@ -48,11 +48,18 @@ public class PinnedSourceHttpClient {
     }
 
     public SourceHttpResponse get(SourceUrlPolicy.ResolvedSourceUrl target) throws IOException {
+        return get(target, startDeadline());
+    }
+
+    RequestDeadline startDeadline() {
+        return new RequestDeadline(System.nanoTime() + requestTimeout.toNanos());
+    }
+
+    SourceHttpResponse get(SourceUrlPolicy.ResolvedSourceUrl target, RequestDeadline deadline) throws IOException {
         IOException lastFailure = null;
-        long deadlineNanos = System.nanoTime() + requestTimeout.toNanos();
         for (var address : target.addresses()) {
             try {
-                return getFromAddress(target.uri(), address.getHostAddress(), deadlineNanos);
+                return getFromAddress(target.uri(), address.getHostAddress(), deadline.deadlineNanos());
             } catch (IOException exception) {
                 lastFailure = exception;
             }
@@ -288,6 +295,9 @@ public class PinnedSourceHttpClient {
         public String firstHeader(String name) {
             return headers.get(name.toLowerCase(Locale.ROOT));
         }
+    }
+
+    record RequestDeadline(long deadlineNanos) {
     }
 
     private record ResponseHead(int statusCode, Map<String, String> headers) {
