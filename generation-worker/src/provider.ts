@@ -29,13 +29,13 @@ export interface GenerationResult {
 
 export interface GenerationProvider {
   readonly name: string;
-  generate(request: GenerationRequest): Promise<GenerationResult>;
+  generate(request: GenerationRequest, signal?: AbortSignal): Promise<GenerationResult>;
 }
 
 export function createGenerationWorker(provider: GenerationProvider) {
   return {
-    generate(request: GenerationRequest): Promise<GenerationResult> {
-      return provider.generate(request);
+    generate(request: GenerationRequest, signal?: AbortSignal): Promise<GenerationResult> {
+      return provider.generate(request, signal);
     },
   };
 }

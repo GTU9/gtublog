@@ -1,6 +1,11 @@
 package com.gtublog.automation;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
-public record GenerationJobSubmitResponse(Long jobId, String status, LocalDateTime submittedAt) {
+public record GenerationJobSubmitResponse(
+        Long jobId,
+        String status,
+        Instant submittedAt,
+        String terminalSubmissionId,
+        String payloadDigest) {
 }

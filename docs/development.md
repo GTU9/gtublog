@@ -33,3 +33,16 @@ Story 8 adds the shared generation-job contract, internal worker claim/submit AP
 The remote baseline lives in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). It runs the backend check, frontend and generation-worker quality jobs, Playwright E2E, and `docker compose config` on GitHub Actions for `prototype`, `story/**`, and pull requests targeting `prototype`.
 
 Use the local gate before pushing when possible; use the remote workflow as the merge guard and Linux runner parity check.
+# Generation worker
+
+Copy the generation variables from `.env.example`, build the worker, and use
+`pnpm --dir generation-worker start:once` for a single claim. Exit codes are `0` for no
+job or success, `2` for configuration/authentication/contract failure, `3` for a
+transient backend or provider failure, and `4` for shutdown/timeout. Logs are structured
+JSON and intentionally include only event, worker ID, job ID, category, and status.
+The container health probe runs `node dist/healthcheck.js`; it is ready only while the
+worker process is alive, shutdown has not begun, and a successful backend contact was
+recorded within `GENERATION_READINESS_MAX_AGE_MS`.
+
+The Codex adapter remains unavailable by default. Local Codex App login state is not a
+valid unattended credential and must never be mounted into the runtime container.

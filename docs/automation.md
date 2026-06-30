@@ -56,3 +56,32 @@ Recommended dashboard cuts:
 - source snapshot result distribution by `source_type`
 - outbox retry/delivery trend
 - publication duration histogram
+# Generation worker runtime
+
+The generation worker is a separately deployed, non-root Node process. Build it with
+`pnpm --dir generation-worker build` and run `pnpm --dir generation-worker start` or
+`start:once`. It talks only to `/api/v2/internal/generation-jobs` with `X-Worker-Token`.
+
+The v2 terminal request carries a UUID plus a SHA-256 digest of canonical UTF-8 JSON.
+Spring recomputes the digest and commits the terminal identity with publication side
+effects. A retry with the same identity and digest returns the committed result; any
+terminal transition or digest mismatch returns `409`.
+
+Codex production execution is intentionally frozen unless
+an external canary attestation is mounted at `GENERATION_CODEX_CANARY_ATTESTATION_PATH`
+and its `artifactDigest` matches the runtime digest baked read-only into the image.
+That digest covers the emitted JavaScript, deployed production package and dependencies,
+lockfile, TypeScript build settings, Dockerfile, and the pinned base-image reference
+at `/app/ARTIFACT_DIGEST`. The legacy boolean is
+accepted only by the test process. Approval requires the documented
+clean-container canary to prove that model-invoked tools cannot read the worker token,
+API key, repository, host home, Docker socket, or another process environment. Merely
+having a working Codex API key is not approval. The container must run non-root with a
+read-only root filesystem and private tmpfs mounts for `/tmp` and `/home/worker`.
+Compose also drops all Linux capabilities, enables `no-new-privileges`, limits PIDs,
+and uses `node dist/healthcheck.js` to require a live process plus a recent successful
+backend contact. Inspect it with `docker compose --profile generation ps`.
+
+Shutdown stops claims, aborts the active turn, stops heartbeat, and attempts only the
+already-selected terminal payload within the grace period. Success-submit ambiguity is
+never converted into a failure submission.

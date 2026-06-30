@@ -1,0 +1,70 @@
+openapi: 3.1.0
+info:
+  title: GTU Blog Generation Worker API
+  version: 2.0.0
+servers:
+  - url: /api/v2/internal
+paths:
+  /generation-jobs/claim:
+    post:
+      operationId: claimGenerationJob
+      security: [{ workerToken: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: ../automation/v2/claim-request.schema.json }
+      responses:
+        '200':
+          description: Claimed job
+          content:
+            application/json:
+              schema: { $ref: ../automation/v2/claim-response.schema.json }
+        '204': { description: No claimable job }
+  /generation-jobs/{jobId}/heartbeat:
+    post:
+      operationId: heartbeatGenerationJob
+      security: [{ workerToken: [] }]
+      parameters:
+        - { name: jobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: ../automation/v2/heartbeat-request.schema.json }
+      responses:
+        '200':
+          description: Renewed lease
+          content:
+            application/json:
+              schema: { $ref: ../automation/v2/heartbeat-response.schema.json }
+        '409': { description: Lease lost }
+  /generation-jobs/{jobId}/submit:
+    post:
+      operationId: submitGenerationResult
+      security: [{ workerToken: [] }]
+      parameters:
+        - { name: jobId, in: path, required: true, schema: { type: integer, minimum: 1 } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: ../automation/v2/submit-request.schema.json }
+      responses:
+        '200':
+          description: Idempotent committed terminal result
+          content:
+            application/json:
+              schema: { $ref: ../automation/v2/submit-response.schema.json }
+        '202':
+          description: Newly committed terminal result
+          content:
+            application/json:
+              schema: { $ref: ../automation/v2/submit-response.schema.json }
+        '409': { description: Lease lost or terminal identity conflict }
+components:
+  securitySchemes:
+    workerToken:
+      type: apiKey
+      in: header
+      name: X-Worker-Token

@@ -13,7 +13,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/v1/internal/generation-jobs")
+@RequestMapping("/api/v2/internal/generation-jobs")
 public class GenerationWorkerController {
 
     public static final String WORKER_TOKEN_HEADER = "X-Worker-Token";

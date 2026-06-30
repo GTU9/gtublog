@@ -64,6 +64,12 @@ public class GenerationJob extends BaseEntity {
     @Column(name = "failure_reason", columnDefinition = "longtext")
     private String failureReason;
 
+    @Column(name = "terminal_submission_id", length = 36)
+    private String terminalSubmissionId;
+
+    @Column(name = "terminal_payload_digest", length = 64)
+    private String terminalPayloadDigest;
+
     protected GenerationJob() {
     }
 
@@ -181,6 +187,10 @@ public class GenerationJob extends BaseEntity {
         return failureReason;
     }
 
+    public String getTerminalSubmissionId() { return terminalSubmissionId; }
+
+    public String getTerminalPayloadDigest() { return terminalPayloadDigest; }
+
     public void claim(String workerId, LocalDateTime leaseExpiresAt, LocalDateTime now) {
         this.jobStatus = GenerationJobStatus.CLAIMED;
         this.workerId = workerId;
@@ -197,18 +207,22 @@ public class GenerationJob extends BaseEntity {
         this.leaseExpiresAt = leaseExpiresAt;
     }
 
-    public void submit(String workerId, String resultPayloadJson, LocalDateTime now) {
+    public void submit(String workerId, String terminalSubmissionId, String terminalPayloadDigest, String resultPayloadJson, LocalDateTime now) {
         requireLeaseOwner(workerId, now);
         this.jobStatus = GenerationJobStatus.SUBMITTED;
         this.resultPayloadJson = resultPayloadJson;
+        this.terminalSubmissionId = terminalSubmissionId;
+        this.terminalPayloadDigest = terminalPayloadDigest;
         this.submittedAt = now;
         clearLease();
     }
 
-    public void fail(String workerId, String failureReason, LocalDateTime now) {
+    public void fail(String workerId, String terminalSubmissionId, String terminalPayloadDigest, String failureReason, LocalDateTime now) {
         requireLeaseOwner(workerId, now);
         this.jobStatus = GenerationJobStatus.FAILED;
         this.failureReason = failureReason;
+        this.terminalSubmissionId = terminalSubmissionId;
+        this.terminalPayloadDigest = terminalPayloadDigest;
         this.submittedAt = now;
         clearLease();
     }
@@ -240,13 +254,13 @@ public class GenerationJob extends BaseEntity {
 
     private void requireLeaseOwner(String workerId, LocalDateTime now) {
         if (this.workerId == null || !this.workerId.equals(workerId)) {
-            throw new IllegalStateException("The generation job is claimed by another worker.");
+            throw new GenerationLeaseLostException("The generation job is claimed by another worker.");
         }
         if (leaseExpired(now)) {
-            throw new IllegalStateException("The generation job lease has expired.");
+            throw new GenerationLeaseLostException("The generation job lease has expired.");
         }
         if (jobStatus != GenerationJobStatus.CLAIMED) {
-            throw new IllegalStateException("The generation job is not claimable for this action.");
+            throw new GenerationLeaseLostException("The generation job is not claimable for this action.");
         }
     }
 

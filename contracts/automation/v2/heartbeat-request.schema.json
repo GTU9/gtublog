@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gtublog.dev/contracts/automation/v2/heartbeat-request.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["workerId"],
+  "properties": {
+    "workerId": { "type": "string", "minLength": 1, "maxLength": 120 }
+  }
+}
