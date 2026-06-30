@@ -104,6 +104,97 @@ class ContentApiIntegrationTests {
     }
 
     @Test
+    void sanitizesHtmlForManualCreateUpdateAndRevisionRestore() throws Exception {
+        var bearerToken = bearerToken();
+        var categoryId = taxonomyId(mockMvc.perform(post("/api/v1/admin/taxonomy/categories")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Security"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn());
+
+        var createResult = mockMvc.perform(post("/api/v1/admin/posts")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "slug":"stored-xss-test",
+                                  "title":"Stored XSS test",
+                                  "excerpt":"Sanitizer regression",
+                                  "contentMarkdown":"safe",
+                                  "contentHtml":"<script>alert(1)</script><p onclick='steal()'>safe</p><a href='javascript:alert(2)'>bad</a>",
+                                  "categoryIds":[%d]
+                                }
+                                """.formatted(categoryId)))
+                .andExpect(status().isCreated())
+                .andReturn();
+
+        var created = jsonBody(createResult);
+        var postId = created.get("id").asLong();
+        assertThat(created.get("contentHtml").asText())
+                .isEqualTo("<p>safe</p><a rel=\"nofollow noopener noreferrer\">bad</a>");
+        assertStoredHtmlIsSanitized(postId);
+
+        mockMvc.perform(put("/api/v1/admin/posts/{id}", postId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "slug":"stored-xss-test",
+                                  "title":"Updated sanitizer test",
+                                  "excerpt":"Safe markup remains",
+                                  "contentMarkdown":"updated",
+                                  "contentHtml":"<h2>Safe</h2><img src='https://example.com/image.png' alt='ok' onerror='steal()'><a href='https://example.com'>source</a>",
+                                  "categoryIds":[%d]
+                                }
+                                """.formatted(categoryId)))
+                .andExpect(status().isOk())
+                .andExpect(result -> assertThat(jsonBody(result).get("contentHtml").asText())
+                        .isEqualTo("<h2>Safe</h2><img src=\"https://example.com/image.png\" alt=\"ok\"><a href=\"https://example.com\" rel=\"nofollow noopener noreferrer\">source</a>"));
+        assertStoredHtmlIsSanitized(postId);
+
+        jdbcTemplate.update(
+                "UPDATE post_revision SET content_html = ? WHERE post_id = ? AND revision_number = 1",
+                "<script>legacy()</script><p onclick='steal()'>safe</p><a href='javascript:legacy()'>bad</a>",
+                postId);
+        mockMvc.perform(post("/api/v1/admin/posts/{id}/revisions/{revisionNumber}/restore", postId, 1)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk())
+                .andExpect(result -> assertThat(jsonBody(result).get("contentHtml").asText())
+                        .isEqualTo("<p>safe</p><a rel=\"nofollow noopener noreferrer\">bad</a>"));
+        assertStoredHtmlIsSanitized(postId);
+        assertThat(jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM post_revision WHERE post_id = ? AND revision_number = 3 AND (content_html LIKE '%<script%' OR content_html LIKE '%javascript:%' OR content_html LIKE '%onerror=%' OR content_html LIKE '%onclick=%')",
+                        Integer.class,
+                        postId))
+                .isZero();
+
+        mockMvc.perform(get("/api/v1/admin/posts/{id}/revisions", postId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk())
+                .andExpect(result -> assertThat(result.getResponse().getContentAsString())
+                        .doesNotContain("<script", "javascript:", "onclick=", "onerror="));
+
+        mockMvc.perform(post("/api/v1/admin/posts/{id}/publish", postId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk());
+        jdbcTemplate.update(
+                "UPDATE post SET content_html = ? WHERE id = ?",
+                "<script>legacy()</script><p onclick='steal()'>legacy safe text</p><a href='javascript:legacy()'>bad</a>",
+                postId);
+
+        mockMvc.perform(get("/api/v1/public/posts/stored-xss-test"))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    var contentHtml = jsonBody(result).get("contentHtml").asText();
+                    assertThat(contentHtml).contains("legacy safe text");
+                    assertThat(contentHtml).doesNotContain("<script", "javascript:", "onclick=", "onerror=");
+                });
+    }
+
+    @Test
     void supportsTaxonomyAndPostLifecycleIncludingPublicDiscoveryAndRevisionRestore() throws Exception {
         var bearerToken = bearerToken();
 
@@ -273,6 +364,12 @@ class ContentApiIntegrationTests {
 
     private long taxonomyId(MvcResult result) throws Exception {
         return jsonBody(result).get("id").asLong();
+    }
+
+    private void assertStoredHtmlIsSanitized(long postId) {
+        var stored = jdbcTemplate.queryForObject("SELECT content_html FROM post WHERE id = ?", String.class, postId);
+        assertThat(stored)
+                .doesNotContain("<script", "javascript:", "onclick=", "onerror=");
     }
 
     private JsonNode jsonBody(MvcResult result) throws Exception {

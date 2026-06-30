@@ -53,4 +53,6 @@ Resolve any returned rows through an audited operational decision before migrati
 - `pnpm --dir generation-worker build`
 - `pnpm exec playwright test`
 - `docker compose config`
+- `pnpm audit --prod --audit-level moderate`
+- Confirm the `Security` workflow passed CodeQL, secret, dependency, and worker image scans.
 - Confirm the GitHub Actions workflow at [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) passed on the story branch or pull request before merge.

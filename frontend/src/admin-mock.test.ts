@@ -18,6 +18,15 @@ describe("admin mock state", () => {
     resetAdminMockState();
   });
 
+  it("escapes active HTML in the Markdown preview", () => {
+    const preview = previewHtmlFromMarkdown('<img src=x onerror="alert(1)">\n\n<script>alert(2)</script>');
+
+    expect(preview).toContain("&lt;img");
+    expect(preview).toContain("&lt;script&gt;");
+    expect(preview).not.toContain("<img");
+    expect(preview).not.toContain("<script");
+  });
+
   it("creates drafts and tracks them in the admin listing", () => {
     const created = mockCreatePost({
       title: "Admin authored draft",
