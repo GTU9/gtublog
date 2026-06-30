@@ -24,6 +24,10 @@ public class PlatformMetricsService {
         meterRegistry.counter("gtublog.automation.generation.jobs", "action", normalize(action)).increment();
     }
 
+    public void recordRunRecovery(String reason) {
+        meterRegistry.counter("gtublog.automation.run.recoveries", "reason", normalize(reason)).increment();
+    }
+
     public void recordSourceSnapshot(String result, String sourceType) {
         meterRegistry.counter(
                         "gtublog.automation.source.snapshots",

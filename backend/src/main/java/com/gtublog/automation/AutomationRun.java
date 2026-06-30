@@ -139,6 +139,7 @@ public class AutomationRun extends BaseEntity {
     }
 
     public void markSucceeded(LocalDateTime completedAt) {
+        requireRunning();
         this.status = AutomationRunStatus.SUCCEEDED;
         this.completedAt = completedAt;
         this.leaseOwner = null;
@@ -147,6 +148,7 @@ public class AutomationRun extends BaseEntity {
     }
 
     public void markHeld(String holdReason, LocalDateTime completedAt) {
+        requireRunning();
         this.status = AutomationRunStatus.HELD;
         this.holdReason = holdReason;
         this.completedAt = completedAt;
@@ -155,10 +157,41 @@ public class AutomationRun extends BaseEntity {
     }
 
     public void markFailed(String holdReason, LocalDateTime completedAt) {
+        requireRunning();
         this.status = AutomationRunStatus.FAILED;
         this.holdReason = holdReason;
         this.completedAt = completedAt;
         this.leaseOwner = null;
         this.leaseExpiresAt = null;
+    }
+
+    public void awaitGeneration(LocalDateTime deadline) {
+        requireRunning();
+        this.leaseOwner = "generation-worker";
+        this.leaseExpiresAt = deadline;
+    }
+
+    public void requireActive(LocalDateTime now) {
+        if (!isActive(now)) {
+            throw new IllegalStateException("The automation run is no longer active.");
+        }
+    }
+
+    public boolean isActive(LocalDateTime now) {
+        return status == AutomationRunStatus.RUNNING
+                && leaseExpiresAt != null
+                && leaseExpiresAt.isAfter(now);
+    }
+
+    public boolean leaseExpired(LocalDateTime now) {
+        return status == AutomationRunStatus.RUNNING
+                && leaseExpiresAt != null
+                && !leaseExpiresAt.isAfter(now);
+    }
+
+    private void requireRunning() {
+        if (status != AutomationRunStatus.RUNNING) {
+            throw new IllegalStateException("The automation run is no longer running.");
+        }
     }
 }

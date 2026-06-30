@@ -94,10 +94,11 @@ public class SourceCollectionService {
         }
     }
 
-    private PinnedSourceHttpClient.SourceHttpResponse fetch(String sourceUrl) throws Exception {
+    PinnedSourceHttpClient.SourceHttpResponse fetch(String sourceUrl) throws Exception {
+        var deadline = sourceHttpClient.startDeadline();
         var currentTarget = sourceUrlPolicy.resolveFetchUrl(sourceUrl);
         for (int redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
-            var response = sourceHttpClient.get(currentTarget);
+            var response = sourceHttpClient.get(currentTarget, deadline);
             if (isRedirect(response.statusCode())) {
                 var location = response.firstHeader("location");
                 if (location == null || location.isBlank()) {

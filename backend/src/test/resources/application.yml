@@ -1,3 +1,19 @@
+spring:
+  quartz:
+    job-store-type: jdbc
+    jdbc:
+      initialize-schema: never
+    properties:
+      org:
+        quartz:
+          scheduler:
+            instanceName: GtuBlogSchedulerTest
+            instanceId: AUTO
+          jobStore:
+            driverDelegateClass: org.quartz.impl.jdbcjobstore.StdJDBCDelegate
+            isClustered: true
+            tablePrefix: QRTZ_
+
 app:
   auth:
     issuer: https://gtublog.test
@@ -56,6 +72,10 @@ app:
   automation:
     collection:
       allowed-private-hosts: localhost,127.0.0.1
+    run:
+      pipeline-lease-duration: PT10M
+      max-duration: PT30M
+      recovery-interval: PT1H
     worker:
       shared-token: worker-test-token
       lease-duration: PT5M

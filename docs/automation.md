@@ -21,10 +21,19 @@ The same summary is available from `GET /api/v1/admin/automation/diagnostics`.
 
 ## Recovery flow
 
-1. Inspect the most recent run detail and hold reason.
+Expired `RUNNING` executions are swept by a Quartz maintenance job. A run uses the shorter pipeline lease until its generation job is committed, then an absolute maximum duration. Every competing transition locks the run before its generation job; recovery then cancels a pending or claimed job, marks the run `FAILED`, clears its lease, and records one system audit event. A late worker submission cannot publish after this transition.
+
+1. Inspect the most recent run detail and hold or failure reason.
 2. If the run is blocked by source accessibility or corroboration, correct the source set or rerun later.
 3. If content published but cache propagation failed, replay pending outbox events from the administrator page or `POST /api/v1/admin/automation/outbox/process`.
 4. If the worker failed, inspect the run audit trail, restart the worker, and retry the run with a new manual trigger.
+5. For `RUN_DEADLINE_EXPIRED`, verify worker health and source latency, then retry with a new idempotency key. Do not reuse the expired run.
+
+Runtime controls:
+
+- `AUTOMATION_RUN_PIPELINE_LEASE_DURATION`: maximum time before generation-job handoff.
+- `AUTOMATION_RUN_MAX_DURATION`: absolute run deadline after handoff.
+- `AUTOMATION_RUN_RECOVERY_INTERVAL`: expired-run sweep interval.
 
 ## Metrics
 
@@ -38,6 +47,7 @@ Current custom metric families:
 - `gtublog_automation_publication_decisions_total`
 - `gtublog_automation_publication_duration_seconds`
 - `gtublog_automation_outbox_deliveries_total`
+- `gtublog_automation_run_recoveries_total`
 
 Recommended dashboard cuts:
 

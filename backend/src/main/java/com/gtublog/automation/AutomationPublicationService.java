@@ -30,8 +30,6 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class AutomationPublicationService {
 
-    private final GenerationJobRepository generationJobRepository;
-    private final AutomationRunRepository automationRunRepository;
     private final AutomationTopicRepository automationTopicRepository;
     private final SourceSnapshotRepository sourceSnapshotRepository;
     private final PostRepository postRepository;
@@ -44,8 +42,6 @@ public class AutomationPublicationService {
     private final PlatformMetricsService platformMetricsService;
 
     public AutomationPublicationService(
-            GenerationJobRepository generationJobRepository,
-            AutomationRunRepository automationRunRepository,
             AutomationTopicRepository automationTopicRepository,
             SourceSnapshotRepository sourceSnapshotRepository,
             PostRepository postRepository,
@@ -56,8 +52,6 @@ public class AutomationPublicationService {
             SlugService slugService,
             Clock clock,
             PlatformMetricsService platformMetricsService) {
-        this.generationJobRepository = generationJobRepository;
-        this.automationRunRepository = automationRunRepository;
         this.automationTopicRepository = automationTopicRepository;
         this.sourceSnapshotRepository = sourceSnapshotRepository;
         this.postRepository = postRepository;
@@ -71,8 +65,11 @@ public class AutomationPublicationService {
     }
 
     @Transactional
-    public PublicationDecision processSubmission(GenerationJob job, GenerationJobSubmitRequest request) {
-        var run = automationRunRepository.findById(job.getRunId()).orElseThrow(() -> new NoSuchElementException("Automation run not found."));
+    public PublicationDecision processSubmission(
+            GenerationJob job,
+            AutomationRun run,
+            GenerationJobSubmitRequest request) {
+        run.requireActive(now());
         var topic = automationTopicRepository.findById(run.getTopicId()).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
         var citedSnapshots = resolveCitedSnapshots(run.getId(), request);
 

@@ -37,6 +37,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
+import org.quartz.Scheduler;
 import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.JsonNode;
@@ -106,6 +107,21 @@ class AutomationPipelineIntegrationTests {
     private AutomationScheduleSynchronizer automationScheduleSynchronizer;
 
     @Autowired
+    private AutomationRunLifecycleService automationRunLifecycleService;
+
+    @Autowired
+    private AutomationRunRecoveryService automationRunRecoveryService;
+
+    @Autowired
+    private GenerationJobService generationJobService;
+
+    @Autowired
+    private AutomationTopicRepository automationTopicRepository;
+
+    @Autowired
+    private Scheduler scheduler;
+
+    @Autowired
     void configureMockMvc(WebApplicationContext context) {
         this.mockMvc = MockMvcBuilders.webAppContextSetup(context)
                 .apply(springSecurity())
@@ -129,6 +145,129 @@ class AutomationPipelineIntegrationTests {
     void automationAdminEndpointsRequireAdminJwt() throws Exception {
         mockMvc.perform(get("/api/v1/admin/automation/topics"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void quartzUsesTheClusteredPersistentJdbcJobStore() throws Exception {
+        var metadata = scheduler.getMetaData();
+        assertThat(metadata.isJobStoreSupportsPersistence()).isTrue();
+        assertThat(metadata.isJobStoreClustered()).isTrue();
+        assertThat(scheduler.checkExists(org.quartz.TriggerKey.triggerKey(
+                "expired-run-recovery", "automation-maintenance"))).isTrue();
+    }
+
+    @Test
+    void recoversAnExpiredPipelineRunExactlyOnce() throws Exception {
+        var topic = automationAdminService.createTopic(new AutomationTopicRequest(null, "Recovery Topic", "v1", false));
+        var run = automationRunLifecycleService.start(topic.id(), null, "MANUAL", "expired-orphan-run").run();
+        jdbcTemplate.update(
+                "UPDATE automation_run SET lease_expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND WHERE id = ?",
+                run.getId());
+
+        assertThat(automationRunRecoveryService.recoverExpiredRuns()).isEqualTo(1);
+        assertThat(automationRunRecoveryService.recoverExpiredRuns()).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM automation_run WHERE id = ?", String.class, run.getId())).isEqualTo("FAILED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT lease_expires_at IS NULL FROM automation_run WHERE id = ?", Boolean.class, run.getId())).isTrue();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_entry WHERE target_id = ? AND action_type = 'AUTOMATION_RUN_RECOVERED_AS_FAILED'",
+                Integer.class,
+                run.getId().toString())).isEqualTo(1);
+    }
+
+    @Test
+    void recoveryCancelsThePendingJobAndPreventsLateClaims() throws Exception {
+        stubAccessibleSource("/recovery-feed");
+        var topic = automationAdminService.createTopic(new AutomationTopicRequest(null, "Pending Recovery", "v1", false));
+        automationAdminService.createSource(topic.id(), new AutomationSourceRequest(
+                AutomationSourceType.HTML,
+                WIREMOCK.baseUrl() + "/recovery-feed",
+                true));
+        var run = automationAdminService.triggerManualRun(topic.id(), "expired-pending-run");
+        jdbcTemplate.update(
+                "UPDATE automation_run SET lease_expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND WHERE id = ?",
+                run.id());
+
+        assertThat(automationRunRecoveryService.recoverExpiredRuns()).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM automation_run WHERE id = ?", String.class, run.id())).isEqualTo("FAILED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT job_status FROM generation_job WHERE run_id = ?", String.class, run.id())).isEqualTo("CANCELLED");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class)).isZero();
+    }
+
+    @Test
+    void concurrentRecoveryCreatesOneTerminalTransitionAndOneAuditEvent() throws Exception {
+        var topic = automationAdminService.createTopic(new AutomationTopicRequest(null, "Concurrent Recovery", "v1", false));
+        var run = automationRunLifecycleService.start(topic.id(), null, "MANUAL", "concurrent-expired-run").run();
+        jdbcTemplate.update(
+                "UPDATE automation_run SET lease_expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND WHERE id = ?",
+                run.getId());
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Callable<Integer> recover = () -> automationRunRecoveryService.recoverExpiredRuns();
+            var results = executor.invokeAll(List.of(recover, recover));
+            assertThat(results.get(0).get() + results.get(1).get()).isEqualTo(1);
+        }
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_entry WHERE target_id = ? AND action_type = 'AUTOMATION_RUN_RECOVERED_AS_FAILED'",
+                Integer.class,
+                run.getId().toString())).isEqualTo(1);
+    }
+
+    @Test
+    void recoveryCannotBeOverwrittenByAConcurrentHold() throws Exception {
+        var topic = automationAdminService.createTopic(new AutomationTopicRequest(null, "Hold Race", "v1", false));
+        var run = automationRunLifecycleService.start(topic.id(), null, "MANUAL", "hold-race-run").run();
+        jdbcTemplate.update(
+                "UPDATE automation_run SET lease_expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND WHERE id = ?",
+                run.getId());
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var recovery = executor.submit(() -> automationRunRecoveryService.recoverExpiredRuns());
+            var hold = executor.submit(() -> {
+                try {
+                    automationRunLifecycleService.hold(run.getId(), "late hold");
+                    return false;
+                } catch (IllegalStateException expected) {
+                    return true;
+                }
+            });
+            assertThat(recovery.get()).isEqualTo(1);
+            assertThat(hold.get()).isTrue();
+        }
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM automation_run WHERE id = ?", String.class, run.getId())).isEqualTo("FAILED");
+    }
+
+    @Test
+    void recoveryAndEnqueueUseOneLockOrderWithoutLeavingAnOrphanJob() throws Exception {
+        var topicResponse = automationAdminService.createTopic(new AutomationTopicRequest(null, "Enqueue Race", "v1", false));
+        var topic = automationTopicRepository.findById(topicResponse.id()).orElseThrow();
+        var run = automationRunLifecycleService.start(topic.getId(), null, "MANUAL", "enqueue-race-run").run();
+        jdbcTemplate.update(
+                "UPDATE automation_run SET lease_expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND WHERE id = ?",
+                run.getId());
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            var enqueue = executor.submit(() -> {
+                try {
+                    generationJobService.enqueueForRun(topic, run, List.of());
+                    return false;
+                } catch (IllegalStateException expected) {
+                    return true;
+                }
+            });
+            var recovery = executor.submit(() -> automationRunRecoveryService.recoverExpiredRuns());
+            assertThat(enqueue.get()).isTrue();
+            assertThat(recovery.get()).isEqualTo(1);
+        }
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM generation_job WHERE run_id = ?", Integer.class, run.getId())).isZero();
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM automation_run WHERE id = ?", String.class, run.getId())).isEqualTo("FAILED");
     }
 
     @Test
