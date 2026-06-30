@@ -1,4 +1,4 @@
-FROM node:24.13.1-alpine3.23@sha256:4f696fbf39f383c1e486030ba6b289a5d9af541642fc78ab197e584a113b9c03 AS build
+FROM node:24.18.0-alpine3.24@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd AS build
 RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
 WORKDIR /workspace
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
@@ -14,7 +14,7 @@ RUN pnpm --dir generation-worker build \
       pnpm-lock.yaml -type f -print0 \
       | sort -z | xargs -0 sha256sum | sha256sum | cut -d ' ' -f 1 > /opt/worker/ARTIFACT_DIGEST
 
-FROM node:24.13.1-alpine3.23@sha256:4f696fbf39f383c1e486030ba6b289a5d9af541642fc78ab197e584a113b9c03
+FROM node:24.18.0-alpine3.24@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd
 ENV NODE_ENV=production HOME=/home/worker CODEX_HOME=/home/worker/.codex
 RUN addgroup -S worker && adduser -S -G worker worker
 WORKDIR /app
