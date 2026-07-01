@@ -16,7 +16,10 @@ RUN pnpm --dir generation-worker build \
 
 FROM node:24.18.0-alpine3.24@sha256:a0b9bf06e4e6193cf7a0f58816cc935ff8c2a908f81e6f1a95432d679c54fbfd
 ENV NODE_ENV=production HOME=/home/worker CODEX_HOME=/home/worker/.codex
-RUN addgroup -S worker && adduser -S -G worker worker
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
+      /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/pnpm /usr/local/bin/pnpx \
+    && addgroup -S worker \
+    && adduser -S -G worker worker
 WORKDIR /app
 COPY --from=build --chown=worker:worker /opt/worker/package.json ./package.json
 COPY --from=build --chown=worker:worker /opt/worker/node_modules ./node_modules
