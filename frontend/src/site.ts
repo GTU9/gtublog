@@ -8,7 +8,9 @@ export const publicApiBaseUrl = (
   process.env.GTUBLOG_PUBLIC_API_BASE_URL ?? "http://127.0.0.1:8080/api/v1/public"
 ).replace(/\/+$/, "");
 export const applicationApiBaseUrl = (
-  process.env.GTUBLOG_APPLICATION_API_BASE_URL ?? "http://127.0.0.1:8080/api/v1"
+  process.env.NEXT_PUBLIC_GTUBLOG_APPLICATION_API_BASE_URL
+    ?? process.env.GTUBLOG_APPLICATION_API_BASE_URL
+    ?? "http://127.0.0.1:8080/api/v1"
 ).replace(/\/+$/, "");
 
 export const defaultRevalidateSeconds = 300;
@@ -18,5 +20,6 @@ export function absoluteUrl(pathname: string) {
 }
 
 export function isDevelopmentRuntime() {
-  return process.env.NODE_ENV !== "production";
+  return process.env.NODE_ENV !== "production"
+    && process.env.NEXT_PUBLIC_GTUBLOG_ENABLE_DEV_MOCKS !== "false";
 }

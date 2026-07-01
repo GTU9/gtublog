@@ -15,4 +15,5 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:3001",
     trace: "on-first-retry",
   },
+  testIgnore: "**/*.fullstack.spec.ts",
 });
