@@ -4,7 +4,9 @@ const scriptPolicy = process.env.NODE_ENV === "development"
   ? "script-src 'self' 'unsafe-inline' 'unsafe-eval'"
   : "script-src 'self' 'unsafe-inline'";
 
-const applicationApiBaseUrl = process.env.GTUBLOG_APPLICATION_API_BASE_URL ?? "http://127.0.0.1:8080/api/v1";
+const applicationApiBaseUrl = process.env.NEXT_PUBLIC_GTUBLOG_APPLICATION_API_BASE_URL
+  ?? process.env.GTUBLOG_APPLICATION_API_BASE_URL
+  ?? "http://127.0.0.1:8080/api/v1";
 const applicationApiOrigin = applicationApiBaseUrl.startsWith("/") ? null : new URL(applicationApiBaseUrl).origin;
 const connectPolicy = `connect-src 'self'${applicationApiOrigin ? ` ${applicationApiOrigin}` : ""}`;
 

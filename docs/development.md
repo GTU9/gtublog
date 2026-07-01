@@ -33,6 +33,18 @@ Story 8 adds the shared generation-job contract, internal worker claim/submit AP
 The remote baseline lives in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). It runs the backend check, frontend and generation-worker quality jobs, Playwright E2E, and `docker compose config` on GitHub Actions for `prototype`, `story/**`, and pull requests targeting `prototype`.
 
 Use the local gate before pushing when possible; use the remote workflow as the merge guard and Linux runner parity check.
+
+## Real-service browser verification
+
+Run `pnpm e2e:fullstack` with Docker available. The command creates a disposable
+MySQL 8.4 container, generates an ephemeral RSA signing key pair, starts the real
+Spring API and a production Next build, and verifies login through public SSR publication.
+It removes the database container on success, failure, or termination. Ports default to
+13306 (MySQL), 18080 (Spring), and 13001 (Next) and can be overridden with the
+corresponding `E2E_*_PORT` variables.
+
+This suite explicitly disables development mock fallback. A failed backend request must
+therefore fail the browser test instead of returning fixture content.
 # Generation worker
 
 Copy the generation variables from `.env.example`, build the worker, and use
