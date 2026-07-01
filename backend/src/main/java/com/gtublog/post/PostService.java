@@ -27,6 +27,7 @@ public class PostService {
     private final PostViewCounterRepository postViewCounterRepository;
     private final PostQueryRepository postQueryRepository;
     private final SlugService slugService;
+    private final PostHtmlSanitizer postHtmlSanitizer;
     private final AuditService auditService;
     private final Clock clock;
 
@@ -38,6 +39,7 @@ public class PostService {
             PostViewCounterRepository postViewCounterRepository,
             PostQueryRepository postQueryRepository,
             SlugService slugService,
+            PostHtmlSanitizer postHtmlSanitizer,
             AuditService auditService,
             Clock clock) {
         this.postRepository = postRepository;
@@ -47,6 +49,7 @@ public class PostService {
         this.postViewCounterRepository = postViewCounterRepository;
         this.postQueryRepository = postQueryRepository;
         this.slugService = slugService;
+        this.postHtmlSanitizer = postHtmlSanitizer;
         this.auditService = auditService;
         this.clock = clock;
     }
@@ -55,12 +58,13 @@ public class PostService {
     public PostDetailResponse create(PostUpsertRequest request) {
         requireExistingTaxonomy(request.categoryIds(), request.tagIds());
         var slug = uniquePostSlug(request.slug(), request.title(), null);
+        var sanitizedContentHtml = postHtmlSanitizer.sanitize(request.contentHtml());
         var post = postRepository.save(Post.draft(
                 slug,
                 request.title(),
                 request.excerpt(),
                 request.contentMarkdown(),
-                request.contentHtml(),
+                sanitizedContentHtml,
                 request.sourceFingerprint()));
         postViewCounterRepository.save(PostViewCounter.initialize(post.getId()));
         postQueryRepository.replaceCategories(post.getId(), request.categoryIds());
@@ -75,7 +79,8 @@ public class PostService {
         requireExistingTaxonomy(request.categoryIds(), request.tagIds());
         var post = postRepository.findById(id).orElseThrow();
         var slug = uniquePostSlug(request.slug(), request.title(), id);
-        post.revise(slug, request.title(), request.excerpt(), request.contentMarkdown(), request.contentHtml());
+        var sanitizedContentHtml = postHtmlSanitizer.sanitize(request.contentHtml());
+        post.revise(slug, request.title(), request.excerpt(), request.contentMarkdown(), sanitizedContentHtml);
         postQueryRepository.replaceCategories(post.getId(), request.categoryIds());
         postQueryRepository.replaceTags(post.getId(), nullableIds(request.tagIds()));
         createRevision(post, RevisionSource.MANUAL_EDIT, request.revisionNote());
@@ -120,7 +125,8 @@ public class PostService {
     public PostDetailResponse restoreRevision(Long postId, int revisionNumber) {
         var post = postRepository.findById(postId).orElseThrow();
         var revision = postRevisionRepository.findByPostIdAndRevisionNumber(postId, revisionNumber).orElseThrow();
-        post.revise(post.getSlug(), revision.getTitle(), revision.getExcerpt(), revision.getContentMarkdown(), revision.getContentHtml());
+        var sanitizedContentHtml = postHtmlSanitizer.sanitize(revision.getContentHtml());
+        post.revise(post.getSlug(), revision.getTitle(), revision.getExcerpt(), revision.getContentMarkdown(), sanitizedContentHtml);
         createRevision(post, RevisionSource.MANUAL_RESTORE, "Revision " + revisionNumber + " restored.");
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.POST, post.getId().toString(), "POST_REVISION_RESTORED", Map.of("revisionNumber", revisionNumber));
         return detail(post.getId(), false);
@@ -148,7 +154,7 @@ public class PostService {
                         revision.getTitle(),
                         revision.getExcerpt(),
                         revision.getContentMarkdown(),
-                        revision.getContentHtml(),
+                        postHtmlSanitizer.sanitize(revision.getContentHtml()),
                         revision.getRevisionSource(),
                         revision.getRevisionNote(),
                         revision.getCreatedAt()))
@@ -224,7 +230,7 @@ public class PostService {
                 post.getTitle(),
                 post.getExcerpt(),
                 post.getContentMarkdown(),
-                post.getContentHtml(),
+                postHtmlSanitizer.sanitize(post.getContentHtml()),
                 post.getStatus(),
                 post.getFirstPublishedAt(),
                 post.getCreatedAt(),

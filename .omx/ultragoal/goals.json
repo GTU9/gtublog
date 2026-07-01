@@ -1,7 +1,7 @@
 {
   "version": 1,
   "createdAt": "2026-06-28T12:08:59.866Z",
-  "updatedAt": "2026-06-30T10:12:28.034Z",
+  "updatedAt": "2026-06-30T15:17:00.000Z",
   "briefPath": ".omx/ultragoal/brief.md",
   "goalsPath": ".omx/ultragoal/goals.json",
   "ledgerPath": ".omx/ultragoal/ledger.jsonl",
@@ -138,11 +138,13 @@
       "id": "G012-story-13-runnable-generation-worker",
       "title": "Story 13 - Runnable generation worker and unattended Codex boundary",
       "objective": "Implement the approved plan in .omx/plans/story-13-generation-worker-runtime.md: runnable long-running and one-shot worker, automation v2 contracts, Spring-recomputed terminal idempotency, monotonic lease deadlines, bounded HTTP behavior, isolated Codex credential/tool boundary, migrations, tests, packaging and operational evidence.",
-      "status": "pending",
-      "attempt": 0,
+      "status": "complete",
+      "attempt": 1,
       "createdAt": "2026-06-30T10:12:04.156Z",
-      "updatedAt": "2026-06-30T10:12:04.156Z",
-      "evidence": "Repository gap analysis found generation-worker is library-only; deliberate Ralplan consensus is complete in .omx/plans/ralplan-consensus-story-13-generation-worker-runtime.json with Architect CLEAR and Critic APPROVE."
+      "updatedAt": "2026-06-30T15:17:00.000Z",
+      "startedAt": "2026-06-30T10:13:09.155Z",
+      "completedAt": "2026-06-30T15:17:00.000Z",
+      "evidence": "Story 13 issue #30 and PR #31 completed the runnable v2 worker, lease/idempotency hardening, runtime-bound canary gate, 60 worker tests, full pnpm quality, independent verifier/code/architecture approval, and UltraQA; merged into prototype at 5a13aa6."
     }
   ],
   "codexObjective": "Complete the durable ultragoal plan in .omx/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .omx/ultragoal/ledger.jsonl as the audit trail.",

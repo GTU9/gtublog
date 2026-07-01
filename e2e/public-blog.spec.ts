@@ -38,3 +38,16 @@ test("rss, sitemap, and robots endpoints are exposed", async ({ request }) => {
   expect(robots.ok()).toBeTruthy();
   expect(await robots.text()).toContain("Sitemap:");
 });
+
+test("public HTML responses include browser security headers", async ({ request }) => {
+  const response = await request.get("/");
+  expect(response.ok()).toBeTruthy();
+  const headers = response.headers();
+  expect(headers["content-security-policy"]).toContain("frame-ancestors 'none'");
+  expect(headers["content-security-policy"]).toContain("connect-src 'self' http://127.0.0.1:8080");
+  expect(headers["x-content-type-options"]).toBe("nosniff");
+  expect(headers["x-frame-options"]).toBe("DENY");
+  expect(headers["referrer-policy"]).toBe("strict-origin-when-cross-origin");
+  expect(headers["permissions-policy"]).toContain("camera=()");
+  expect(headers["strict-transport-security"]).toContain("max-age=31536000");
+});

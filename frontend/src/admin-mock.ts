@@ -83,7 +83,14 @@ function slugify(value: string) {
 }
 
 function markdownToHtml(markdown: string) {
-  return markdown
+  const escapedMarkdown = markdown
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+  return escapedMarkdown
     .split(/\n{2,}/)
     .map((paragraph) => paragraph.trim())
     .filter(Boolean)
