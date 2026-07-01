@@ -48,7 +48,6 @@ const child = spawn("java", ["-jar", `${jarDirectory}/${jarName}`], {
     AUTOMATION_WORKER_SHARED_TOKEN: "e2e-worker-token-not-for-production",
   },
   stdio: "inherit",
-  detached: !windows,
 });
 
 function terminateProcessTree(signal = "SIGTERM") {
@@ -56,7 +55,7 @@ function terminateProcessTree(signal = "SIGTERM") {
   if (windows) {
     spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore" });
   } else {
-    try { process.kill(-child.pid, signal); } catch {}
+    try { child.kill(signal); } catch {}
   }
 }
 
