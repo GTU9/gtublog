@@ -119,7 +119,7 @@ jobs:
   fullstack-e2e:
     name: Full-stack e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 12
 
     steps:
       - name: Checkout
@@ -156,6 +156,8 @@ jobs:
 
       - name: Run real-service publishing flow
         run: pnpm e2e:fullstack
+        env:
+          DEBUG: pw:webserver
 
   compose:
     name: Compose config

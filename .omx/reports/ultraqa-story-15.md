@@ -17,6 +17,7 @@
 - 종료 후 `gtublog-e2e-mysql` 컨테이너와 13001/18080 listener가 0건임을 확인
 - 명시적인 E2E datasource override, ephemeral RSA 키, mock 비활성화, 프로세스 트리 종료 경로 확인
 - `git diff --check`: 통과
+- CI에서 무한 대기를 차단하도록 60초 test timeout과 5분 global timeout을 적용
 - 독립 구현 리뷰: 최초 수명주기 결함 반려 후 수정 재검토 APPROVE
 - 독립 테스트 검증: 최초 datasource/신호 정리 결함 반려 후 수정 재검토 APPROVE
 
