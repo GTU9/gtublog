@@ -54,6 +54,11 @@ class ApiExceptionHandler {
         return problemDetail(HttpStatus.CONFLICT, "Conflict", "The request conflicts with current data state.");
     }
 
+    @ExceptionHandler(com.gtublog.automation.AutomationConfigurationConflictException.class)
+    ProblemDetail handleAutomationConflict(com.gtublog.automation.AutomationConfigurationConflictException exception) {
+        return problemDetail(HttpStatus.CONFLICT, "Automation configuration conflict", exception.getMessage());
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     ProblemDetail handleUnreadableMessage(HttpMessageNotReadableException exception) {
         return problemDetail(HttpStatus.BAD_REQUEST, "Bad request", "The request body is malformed or inconsistent.");

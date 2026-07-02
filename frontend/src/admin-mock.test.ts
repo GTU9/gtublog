@@ -5,9 +5,14 @@ import {
   mockAdminPosts,
   mockChangePostState,
   mockCreatePost,
+  mockDeleteAutomationSchedule,
+  mockDeleteAutomationSource,
   mockDeleteCategory,
   mockPostRevisions,
   mockRestoreRevision,
+  mockSaveAutomationSchedule,
+  mockSaveAutomationSource,
+  mockSaveAutomationTopic,
   mockSaveCategory,
   previewHtmlFromMarkdown,
   resetAdminMockState,
@@ -77,5 +82,33 @@ describe("admin mock state", () => {
     expect(created.categories[0]?.slug).toBe("ai-news");
     mockDeleteCategory(category.id);
     expect(mockAdminPostDetail(created.id)?.categories).toHaveLength(0);
+  });
+
+  it("creates automation configuration records and blocks deletion when history exists", () => {
+    const topic = mockSaveAutomationTopic(null, {
+      name: "Daily roundup",
+      slug: "daily-roundup",
+      promptTemplateVersion: "v2",
+      publicationEnabled: true,
+    });
+    const source = mockSaveAutomationSource(topic.id, null, {
+      sourceType: "RSS",
+      sourceUrl: "https://fresh.example.com/feed.xml",
+      enabled: true,
+    });
+    const schedule = mockSaveAutomationSchedule(topic.id, null, {
+      name: "Lunch run",
+      cronExpression: "0 0 12 * * *",
+      timezone: "Asia/Seoul",
+      status: "ACTIVE",
+      misfirePolicy: "FIRE_ONCE_NOW",
+    });
+
+    expect(topic.slug).toBe("daily-roundup");
+    expect(source.topicId).toBe(topic.id);
+    expect(schedule.syncStatus).toBe("SYNCED");
+
+    expect(() => mockDeleteAutomationSource(101)).toThrow(/Disable it instead of deleting it/);
+    expect(() => mockDeleteAutomationSchedule(201)).toThrow(/Disable it instead of deleting it/);
   });
 });

@@ -8,6 +8,7 @@ import static org.springframework.security.oauth2.jose.jws.SignatureAlgorithm.RS
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
@@ -352,6 +353,8 @@ class AutomationPipelineIntegrationTests {
                 .andReturn();
         assertThat(scheduleResult.getResponse().getStatus()).isEqualTo(201);
         assertThat(jsonBody(scheduleResult).get("nextPlannedRunAt").asText()).isNotBlank();
+        assertThat(jsonBody(scheduleResult).get("syncStatus").asText()).isEqualTo("SYNCED");
+        assertThat(jsonBody(scheduleResult).get("lastSynchronizedAt").asText()).isNotBlank();
 
         var runResult = mockMvc.perform(post("/api/v1/admin/automation/topics/{topicId}/runs/manual", topicId)
                         .header(HttpHeaders.AUTHORIZATION, bearerToken)
@@ -376,6 +379,70 @@ class AutomationPipelineIntegrationTests {
                     assertThat(json.at("/snapshots/0/policyResult").asText()).isEqualTo("ALLOWED");
                     assertThat(json.at("/snapshots/0/sourceUrl").asText()).contains("/topic-feed");
                 });
+    }
+
+    @Test
+    void preventsDeletingReferencedSourcesAndSchedulesAndReturnsConflictDetails() throws Exception {
+        stubAccessibleSource("/reference-feed");
+        var bearerToken = bearerToken();
+
+        long topicId = jsonBody(mockMvc.perform(post("/api/v1/admin/automation/topics")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"Protected Topic",
+                                  "promptTemplateVersion":"v1",
+                                  "publicationEnabled":true
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn()).get("id").asLong();
+
+        long sourceId = jsonBody(mockMvc.perform(post("/api/v1/admin/automation/topics/{topicId}/sources", topicId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "sourceType":"HTML",
+                                  "sourceUrl":"%s",
+                                  "enabled":true
+                                }
+                                """.formatted(WIREMOCK.baseUrl() + "/reference-feed")))
+                .andExpect(status().isCreated())
+                .andReturn()).get("id").asLong();
+
+        long scheduleId = jsonBody(mockMvc.perform(post("/api/v1/admin/automation/topics/{topicId}/schedules", topicId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"Protected schedule",
+                                  "cronExpression":"0 30 9 * * *",
+                                  "timezone":"Asia/Seoul",
+                                  "status":"ACTIVE",
+                                  "misfirePolicy":"DO_NOTHING"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn()).get("id").asLong();
+
+        var run = automationAdminService.triggerManualRun(topicId, "protected-run");
+        automationAdminService.triggerScheduledRun(scheduleId, "protected-scheduled-run", Instant.parse("2026-06-30T01:00:00Z"));
+
+        assertThat(run.snapshotCount()).isGreaterThan(0);
+
+        mockMvc.perform(delete("/api/v1/admin/automation/sources/{sourceId}", sourceId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isConflict())
+                .andExpect(result -> assertThat(jsonBody(result).get("detail").asText())
+                        .contains("Disable it instead of deleting it"));
+
+        mockMvc.perform(delete("/api/v1/admin/automation/schedules/{scheduleId}", scheduleId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isConflict())
+                .andExpect(result -> assertThat(jsonBody(result).get("detail").asText())
+                        .contains("Disable it instead of deleting it"));
     }
 
     @Test

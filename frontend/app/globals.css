@@ -380,6 +380,7 @@ button {
 }
 
 .field input,
+.field select,
 .field textarea {
   width: 100%;
   border-radius: 0.9rem;

@@ -8,4 +8,8 @@ public interface AutomationSourceRepository extends JpaRepository<AutomationSour
     List<AutomationSource> findAllByTopicIdOrderByIdAsc(Long topicId);
 
     List<AutomationSource> findAllByTopicIdAndEnabledTrueOrderByIdAsc(Long topicId);
+
+    boolean existsByTopicIdAndSourceUrl(Long topicId, String sourceUrl);
+
+    boolean existsByTopicIdAndSourceUrlAndIdNot(Long topicId, String sourceUrl, Long id);
 }

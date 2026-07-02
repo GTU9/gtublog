@@ -70,6 +70,13 @@ export type AutomationTopicResponse = {
   updatedAt: string;
 };
 
+export type AutomationTopicUpsertRequest = {
+  slug?: string;
+  name: string;
+  promptTemplateVersion: string;
+  publicationEnabled: boolean;
+};
+
 export type AutomationSourceResponse = {
   id: number;
   topicId: number;
@@ -78,6 +85,12 @@ export type AutomationSourceResponse = {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AutomationSourceUpsertRequest = {
+  sourceType: string;
+  sourceUrl: string;
+  enabled: boolean;
 };
 
 export type AutomationScheduleResponse = {
@@ -89,8 +102,19 @@ export type AutomationScheduleResponse = {
   status: string;
   misfirePolicy: string;
   nextPlannedRunAt: string | null;
+  syncStatus: string;
+  syncErrorMessage: string | null;
+  lastSynchronizedAt: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AutomationScheduleUpsertRequest = {
+  name: string;
+  cronExpression: string;
+  timezone: string;
+  status: string;
+  misfirePolicy: string;
 };
 
 export type AutomationRunResponse = {

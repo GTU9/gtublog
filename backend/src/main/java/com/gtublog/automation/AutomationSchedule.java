@@ -34,6 +34,16 @@ public class AutomationSchedule extends BaseEntity {
     @Column(name = "next_planned_run_at")
     private LocalDateTime nextPlannedRunAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "sync_status", nullable = false, length = 32)
+    private AutomationScheduleSyncStatus syncStatus;
+
+    @Column(name = "sync_error_message", length = 255)
+    private String syncErrorMessage;
+
+    @Column(name = "last_synchronized_at")
+    private LocalDateTime lastSynchronizedAt;
+
     protected AutomationSchedule() {
     }
 
@@ -44,7 +54,10 @@ public class AutomationSchedule extends BaseEntity {
             String timezone,
             AutomationScheduleStatus status,
             String misfirePolicy,
-            LocalDateTime nextPlannedRunAt) {
+            LocalDateTime nextPlannedRunAt,
+            AutomationScheduleSyncStatus syncStatus,
+            String syncErrorMessage,
+            LocalDateTime lastSynchronizedAt) {
         this.topicId = topicId;
         this.name = name;
         this.cronExpression = cronExpression;
@@ -52,6 +65,9 @@ public class AutomationSchedule extends BaseEntity {
         this.status = status;
         this.misfirePolicy = misfirePolicy;
         this.nextPlannedRunAt = nextPlannedRunAt;
+        this.syncStatus = syncStatus;
+        this.syncErrorMessage = syncErrorMessage;
+        this.lastSynchronizedAt = lastSynchronizedAt;
     }
 
     public static AutomationSchedule create(
@@ -62,7 +78,17 @@ public class AutomationSchedule extends BaseEntity {
             AutomationScheduleStatus status,
             String misfirePolicy,
             LocalDateTime nextPlannedRunAt) {
-        return new AutomationSchedule(topicId, name, cronExpression, timezone, status, misfirePolicy, nextPlannedRunAt);
+        return new AutomationSchedule(
+                topicId,
+                name,
+                cronExpression,
+                timezone,
+                status,
+                misfirePolicy,
+                nextPlannedRunAt,
+                AutomationScheduleSyncStatus.OUT_OF_SYNC,
+                "Schedule has not been synchronized yet.",
+                null);
     }
 
     public Long getId() {
@@ -97,6 +123,18 @@ public class AutomationSchedule extends BaseEntity {
         return nextPlannedRunAt;
     }
 
+    public AutomationScheduleSyncStatus getSyncStatus() {
+        return syncStatus;
+    }
+
+    public String getSyncErrorMessage() {
+        return syncErrorMessage;
+    }
+
+    public LocalDateTime getLastSynchronizedAt() {
+        return lastSynchronizedAt;
+    }
+
     public boolean isActive() {
         return status == AutomationScheduleStatus.ACTIVE;
     }
@@ -114,5 +152,16 @@ public class AutomationSchedule extends BaseEntity {
         this.status = status;
         this.misfirePolicy = misfirePolicy;
         this.nextPlannedRunAt = nextPlannedRunAt;
+    }
+
+    public void markSynchronized(LocalDateTime synchronizedAt) {
+        this.syncStatus = AutomationScheduleSyncStatus.SYNCED;
+        this.syncErrorMessage = null;
+        this.lastSynchronizedAt = synchronizedAt;
+    }
+
+    public void markOutOfSync(String errorMessage) {
+        this.syncStatus = AutomationScheduleSyncStatus.OUT_OF_SYNC;
+        this.syncErrorMessage = errorMessage;
     }
 }

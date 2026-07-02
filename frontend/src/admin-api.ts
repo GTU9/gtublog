@@ -10,8 +10,11 @@ import type {
   AutomationRunDetailResponse,
   AutomationRunResponse,
   AutomationScheduleResponse,
+  AutomationScheduleUpsertRequest,
   AutomationSourceResponse,
+  AutomationSourceUpsertRequest,
   AutomationTopicResponse,
+  AutomationTopicUpsertRequest,
   PostRevisionResponse,
   TaxonomyResponse,
 } from "@/src/admin-types";
@@ -28,6 +31,11 @@ import {
   mockAutomationDiagnostics,
   mockAutomationRunDetail,
   mockAutomationRuns,
+  mockDeleteAutomationSchedule,
+  mockDeleteAutomationSource,
+  mockSaveAutomationSchedule,
+  mockSaveAutomationSource,
+  mockSaveAutomationTopic,
   mockAutomationSchedules,
   mockAutomationSources,
   mockAutomationTopics,
@@ -42,9 +50,24 @@ import {
 } from "@/src/admin-mock";
 import { applicationApiBaseUrl, isDevelopmentRuntime } from "@/src/site";
 
+async function toApiError(response: Response, fallbackMessage: string) {
+  try {
+    const payload = (await response.json()) as { detail?: string; title?: string };
+    if (payload.detail && payload.detail.trim().length > 0) {
+      return new Error(payload.detail);
+    }
+    if (payload.title && payload.title.trim().length > 0) {
+      return new Error(payload.title);
+    }
+  } catch {
+    // fall through to fallback message
+  }
+  return new Error(fallbackMessage);
+}
+
 async function parseOrThrow<T>(response: Response, errorMessage: string) {
   if (!response.ok) {
-    throw new Error(errorMessage);
+    throw await toApiError(response, errorMessage);
   }
 
   return (await response.json()) as T;
@@ -301,6 +324,26 @@ export async function fetchAutomationTopics(authenticatedFetch: (input: string, 
   }
 }
 
+export async function saveAutomationTopic(
+  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  editingId: number | null,
+  request: AutomationTopicUpsertRequest,
+) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/topics${editingId ? `/${editingId}` : ""}`, {
+      method: editingId ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    return await parseOrThrow<AutomationTopicResponse>(response, "Failed to save automation topic.");
+  } catch (error) {
+    if (isDevelopmentRuntime()) {
+      return mockSaveAutomationTopic(editingId, request);
+    }
+    throw error;
+  }
+}
+
 export async function fetchAutomationSources(
   authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
   topicId: number,
@@ -316,6 +359,51 @@ export async function fetchAutomationSources(
   }
 }
 
+export async function saveAutomationSource(
+  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  topicId: number,
+  editingId: number | null,
+  request: AutomationSourceUpsertRequest,
+) {
+  try {
+    const response = await authenticatedFetch(
+      `${applicationApiBaseUrl}/admin/automation/${editingId ? `sources/${editingId}` : `topics/${topicId}/sources`}`,
+      {
+        method: editingId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      },
+    );
+    return await parseOrThrow<AutomationSourceResponse>(response, "Failed to save automation source.");
+  } catch (error) {
+    if (isDevelopmentRuntime()) {
+      return mockSaveAutomationSource(topicId, editingId, request);
+    }
+    throw error;
+  }
+}
+
+export async function deleteAutomationSource(
+  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  sourceId: number,
+) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/sources/${sourceId}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      throw await toApiError(response, "Failed to delete automation source.");
+    }
+    return;
+  } catch (error) {
+    if (isDevelopmentRuntime()) {
+      mockDeleteAutomationSource(sourceId);
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function fetchAutomationSchedules(
   authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
   topicId: number,
@@ -328,6 +416,51 @@ export async function fetchAutomationSchedules(
       return mockAutomationSchedules(topicId);
     }
     throw new Error("Failed to fetch automation schedules.");
+  }
+}
+
+export async function saveAutomationSchedule(
+  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  topicId: number,
+  editingId: number | null,
+  request: AutomationScheduleUpsertRequest,
+) {
+  try {
+    const response = await authenticatedFetch(
+      `${applicationApiBaseUrl}/admin/automation/${editingId ? `schedules/${editingId}` : `topics/${topicId}/schedules`}`,
+      {
+        method: editingId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request),
+      },
+    );
+    return await parseOrThrow<AutomationScheduleResponse>(response, "Failed to save automation schedule.");
+  } catch (error) {
+    if (isDevelopmentRuntime()) {
+      return mockSaveAutomationSchedule(topicId, editingId, request);
+    }
+    throw error;
+  }
+}
+
+export async function deleteAutomationSchedule(
+  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  scheduleId: number,
+) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/schedules/${scheduleId}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) {
+      throw await toApiError(response, "Failed to delete automation schedule.");
+    }
+    return;
+  } catch (error) {
+    if (isDevelopmentRuntime()) {
+      mockDeleteAutomationSchedule(scheduleId);
+      return;
+    }
+    throw error;
   }
 }
 
@@ -407,7 +540,7 @@ export async function processAutomationOutbox(authenticatedFetch: (input: string
       method: "POST",
     });
     if (!response.ok) {
-      throw new Error("Failed to process automation outbox.");
+      throw await toApiError(response, "Failed to process automation outbox.");
     }
     return;
   } catch {
