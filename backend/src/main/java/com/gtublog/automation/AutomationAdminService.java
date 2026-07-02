@@ -101,6 +101,7 @@ public class AutomationAdminService {
     public AutomationSourceResponse createSource(Long topicId, AutomationSourceRequest request) {
         requireTopic(topicId);
         var sourceUrl = sourceUrlPolicy.validateStoredUrl(request.sourceUrl()).toASCIIString();
+        ensureUniqueSource(topicId, sourceUrl, null);
         var source = automationSourceRepository.save(
                 AutomationSource.create(topicId, request.sourceType(), sourceUrl, request.enabled()));
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, source.getId().toString(), "AUTOMATION_SOURCE_CREATED", Map.of("topicId", topicId));
@@ -111,6 +112,7 @@ public class AutomationAdminService {
     public AutomationSourceResponse updateSource(Long sourceId, AutomationSourceRequest request) {
         var source = automationSourceRepository.findById(sourceId).orElseThrow(() -> new NoSuchElementException("Automation source not found."));
         var sourceUrl = sourceUrlPolicy.validateStoredUrl(request.sourceUrl()).toASCIIString();
+        ensureUniqueSource(source.getTopicId(), sourceUrl, sourceId);
         source.update(request.sourceType(), sourceUrl, request.enabled());
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, source.getId().toString(), "AUTOMATION_SOURCE_UPDATED", Map.of("topicId", source.getTopicId()));
         return toSourceResponse(source);
@@ -118,7 +120,12 @@ public class AutomationAdminService {
 
     @Transactional
     public void deleteSource(Long sourceId) {
-        automationSourceRepository.deleteById(sourceId);
+        var source = automationSourceRepository.findById(sourceId).orElseThrow(() -> new NoSuchElementException("Automation source not found."));
+        if (sourceSnapshotRepository.existsByAutomationSourceId(sourceId)) {
+            throw new AutomationConfigurationConflictException(
+                    "This source is already referenced by collected evidence. Disable it instead of deleting it.");
+        }
+        automationSourceRepository.delete(source);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, sourceId.toString(), "AUTOMATION_SOURCE_DELETED", Map.of());
     }
 
@@ -132,6 +139,7 @@ public class AutomationAdminService {
     public AutomationScheduleResponse createSchedule(Long topicId, AutomationScheduleRequest request) {
         requireTopic(topicId);
         validateCron(request.cronExpression(), request.timezone());
+        ensureUniqueSchedule(topicId, request.name(), null);
         var schedule = automationScheduleRepository.save(AutomationSchedule.create(
                 topicId,
                 request.name(),
@@ -140,7 +148,7 @@ public class AutomationAdminService {
                 request.status(),
                 normalizeMisfirePolicy(request.misfirePolicy()),
                 nextRunAt(request.cronExpression(), request.timezone())));
-        synchronizeScheduleBestEffort(schedule);
+        synchronizeSchedule(schedule);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, schedule.getId().toString(), "AUTOMATION_SCHEDULE_CREATED", Map.of("topicId", topicId));
         return toScheduleResponse(schedule);
     }
@@ -149,6 +157,7 @@ public class AutomationAdminService {
     public AutomationScheduleResponse updateSchedule(Long scheduleId, AutomationScheduleRequest request) {
         var schedule = automationScheduleRepository.findById(scheduleId).orElseThrow(() -> new NoSuchElementException("Automation schedule not found."));
         validateCron(request.cronExpression(), request.timezone());
+        ensureUniqueSchedule(schedule.getTopicId(), request.name(), scheduleId);
         schedule.update(
                 request.name(),
                 request.cronExpression(),
@@ -156,14 +165,19 @@ public class AutomationAdminService {
                 request.status(),
                 normalizeMisfirePolicy(request.misfirePolicy()),
                 nextRunAt(request.cronExpression(), request.timezone()));
-        synchronizeScheduleBestEffort(schedule);
+        synchronizeSchedule(schedule);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, schedule.getId().toString(), "AUTOMATION_SCHEDULE_UPDATED", Map.of("topicId", schedule.getTopicId()));
         return toScheduleResponse(schedule);
     }
 
     @Transactional
     public void deleteSchedule(Long scheduleId) {
-        automationScheduleRepository.deleteById(scheduleId);
+        var schedule = automationScheduleRepository.findById(scheduleId).orElseThrow(() -> new NoSuchElementException("Automation schedule not found."));
+        if (automationRunRepository.existsByScheduleId(scheduleId)) {
+            throw new AutomationConfigurationConflictException(
+                    "This schedule already has run history. Disable it instead of deleting it.");
+        }
+        automationScheduleRepository.delete(schedule);
         removeScheduleBestEffort(scheduleId);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, scheduleId.toString(), "AUTOMATION_SCHEDULE_DELETED", Map.of());
     }
@@ -319,11 +333,30 @@ public class AutomationAdminService {
         return next == null ? null : next.atZone(zoneId).withZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
     }
 
-    private void synchronizeScheduleBestEffort(AutomationSchedule schedule) {
+    private void ensureUniqueSource(Long topicId, String sourceUrl, Long sourceId) {
+        boolean exists = sourceId == null
+                ? automationSourceRepository.existsByTopicIdAndSourceUrl(topicId, sourceUrl)
+                : automationSourceRepository.existsByTopicIdAndSourceUrlAndIdNot(topicId, sourceUrl, sourceId);
+        if (exists) {
+            throw new AutomationConfigurationConflictException("This topic already includes the same source URL.");
+        }
+    }
+
+    private void ensureUniqueSchedule(Long topicId, String name, Long scheduleId) {
+        boolean exists = scheduleId == null
+                ? automationScheduleRepository.existsByTopicIdAndNameIgnoreCase(topicId, name)
+                : automationScheduleRepository.existsByTopicIdAndNameIgnoreCaseAndIdNot(topicId, name, scheduleId);
+        if (exists) {
+            throw new AutomationConfigurationConflictException("This topic already includes a schedule with the same name.");
+        }
+    }
+
+    private void synchronizeSchedule(AutomationSchedule schedule) {
         try {
             automationScheduleSynchronizer.synchronize(schedule);
-        } catch (IllegalStateException ignored) {
-            // The domain schedule row remains authoritative even when Quartz synchronization fails.
+            schedule.markSynchronized(LocalDateTime.now(ZoneOffset.UTC));
+        } catch (IllegalStateException exception) {
+            schedule.markOutOfSync("Quartz synchronization failed. Review the schedule and save it again after the scheduler recovers.");
         }
     }
 
@@ -367,6 +400,9 @@ public class AutomationAdminService {
                 schedule.getStatus(),
                 schedule.getMisfirePolicy(),
                 schedule.getNextPlannedRunAt(),
+                schedule.getSyncStatus(),
+                schedule.getSyncErrorMessage(),
+                schedule.getLastSynchronizedAt(),
                 schedule.getCreatedAt(),
                 schedule.getUpdatedAt());
     }

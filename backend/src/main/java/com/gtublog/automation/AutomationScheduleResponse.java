@@ -11,6 +11,9 @@ public record AutomationScheduleResponse(
         AutomationScheduleStatus status,
         String misfirePolicy,
         LocalDateTime nextPlannedRunAt,
+        AutomationScheduleSyncStatus syncStatus,
+        String syncErrorMessage,
+        LocalDateTime lastSynchronizedAt,
         LocalDateTime createdAt,
         LocalDateTime updatedAt) {
 }

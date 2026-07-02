@@ -15,6 +15,8 @@ public interface AutomationRunRepository extends JpaRepository<AutomationRun, Lo
 
     List<AutomationRun> findTop20ByOrderByCreatedAtDesc();
 
+    boolean existsByScheduleId(Long scheduleId);
+
     long countByStatus(AutomationRunStatus status);
 
     List<AutomationRun> findTop5ByStatusOrderByUpdatedAtDesc(AutomationRunStatus status);

@@ -10,8 +10,11 @@ import type {
   AutomationRunDetailResponse,
   AutomationRunResponse,
   AutomationScheduleResponse,
+  AutomationScheduleUpsertRequest,
   AutomationSourceResponse,
+  AutomationSourceUpsertRequest,
   AutomationTopicResponse,
+  AutomationTopicUpsertRequest,
   PostRevisionResponse,
   TaxonomyResponse,
 } from "./admin-types";
@@ -137,7 +140,7 @@ let auditStore: AuditEntryResponse[] = [
 let nextPostId = Math.max(...postsStore.map((post) => post.id), 100) + 1;
 let nextTaxonomyId = Math.max(...categoriesStore.map((item) => item.id), ...tagsStore.map((item) => item.id), 12) + 1;
 let nextAuditId = Math.max(...auditStore.map((entry) => entry.id), 9000) + 1;
-const automationTopicsStore: AutomationTopicResponse[] = [
+const initialAutomationTopics: AutomationTopicResponse[] = [
   {
     id: 1,
     slug: "ai-daily-briefing",
@@ -148,7 +151,7 @@ const automationTopicsStore: AutomationTopicResponse[] = [
     updatedAt: "2026-06-29T08:10:00Z",
   },
 ];
-const automationSourcesStore: AutomationSourceResponse[] = [
+const initialAutomationSources: AutomationSourceResponse[] = [
   {
     id: 101,
     topicId: 1,
@@ -161,14 +164,14 @@ const automationSourcesStore: AutomationSourceResponse[] = [
   {
     id: 102,
     topicId: 1,
-    sourceType: "WEB",
+    sourceType: "HTML",
     sourceUrl: "https://news.example.org/ai",
     enabled: true,
     createdAt: "2026-06-28T08:06:00Z",
     updatedAt: "2026-06-28T08:06:00Z",
   },
 ];
-const automationSchedulesStore: AutomationScheduleResponse[] = [
+const initialAutomationSchedules: AutomationScheduleResponse[] = [
   {
     id: 201,
     topicId: 1,
@@ -178,10 +181,19 @@ const automationSchedulesStore: AutomationScheduleResponse[] = [
     status: "ACTIVE",
     misfirePolicy: "FIRE_ONCE_NOW",
     nextPlannedRunAt: "2026-06-30T00:00:00Z",
+    syncStatus: "SYNCED",
+    syncErrorMessage: null,
+    lastSynchronizedAt: "2026-06-29T08:10:00Z",
     createdAt: "2026-06-28T08:07:00Z",
     updatedAt: "2026-06-29T08:10:00Z",
   },
 ];
+let automationTopicsStore = initialAutomationTopics.map((item) => ({ ...item }));
+let automationSourcesStore = initialAutomationSources.map((item) => ({ ...item }));
+let automationSchedulesStore = initialAutomationSchedules.map((item) => ({ ...item }));
+let nextAutomationTopicId = Math.max(...initialAutomationTopics.map((item) => item.id), 1) + 1;
+let nextAutomationSourceId = Math.max(...initialAutomationSources.map((item) => item.id), 100) + 1;
+let nextAutomationScheduleId = Math.max(...initialAutomationSchedules.map((item) => item.id), 200) + 1;
 let automationRunsStore: AutomationRunResponse[] = [
   {
     id: 301,
@@ -362,18 +374,136 @@ export function resetAdminMockState() {
   nextPostId = Math.max(...postsStore.map((post) => post.id), 100) + 1;
   nextTaxonomyId = Math.max(...categoriesStore.map((item) => item.id), ...tagsStore.map((item) => item.id), 12) + 1;
   nextAuditId = Math.max(...auditStore.map((entry) => entry.id), 9000) + 1;
+  automationTopicsStore = initialAutomationTopics.map((item) => ({ ...item }));
+  automationSourcesStore = initialAutomationSources.map((item) => ({ ...item }));
+  automationSchedulesStore = initialAutomationSchedules.map((item) => ({ ...item }));
+  nextAutomationTopicId = Math.max(...initialAutomationTopics.map((item) => item.id), 1) + 1;
+  nextAutomationSourceId = Math.max(...initialAutomationSources.map((item) => item.id), 100) + 1;
+  nextAutomationScheduleId = Math.max(...initialAutomationSchedules.map((item) => item.id), 200) + 1;
 }
 
 export function mockAutomationTopics() {
   return automationTopicsStore.map((item) => ({ ...item }));
 }
 
+export function mockSaveAutomationTopic(editingId: number | null, request: AutomationTopicUpsertRequest) {
+  const now = new Date().toISOString();
+  const record: AutomationTopicResponse = {
+    id: editingId ?? nextAutomationTopicId++,
+    slug: request.slug?.trim() || slugify(request.name),
+    name: request.name.trim(),
+    promptTemplateVersion: request.promptTemplateVersion.trim(),
+    publicationEnabled: request.publicationEnabled,
+    createdAt: editingId
+      ? (automationTopicsStore.find((item) => item.id === editingId)?.createdAt ?? now)
+      : now,
+    updatedAt: now,
+  };
+
+  automationTopicsStore = editingId
+    ? automationTopicsStore.map((item) => (item.id === editingId ? record : item))
+    : [...automationTopicsStore, record];
+  recordAudit("AUTOMATION", String(record.id), editingId ? "AUTOMATION_TOPIC_UPDATED" : "AUTOMATION_TOPIC_CREATED", {
+    slug: record.slug,
+  });
+  return { ...record };
+}
+
 export function mockAutomationSources(topicId: number) {
   return automationSourcesStore.filter((item) => item.topicId === topicId).map((item) => ({ ...item }));
 }
 
+export function mockSaveAutomationSource(
+  topicId: number,
+  editingId: number | null,
+  request: AutomationSourceUpsertRequest,
+) {
+  const now = new Date().toISOString();
+  const existing = editingId ? automationSourcesStore.find((item) => item.id === editingId) : null;
+  const record: AutomationSourceResponse = {
+    id: editingId ?? nextAutomationSourceId++,
+    topicId: existing?.topicId ?? topicId,
+    sourceType: request.sourceType,
+    sourceUrl: request.sourceUrl.trim(),
+    enabled: request.enabled,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+
+  automationSourcesStore = editingId
+    ? automationSourcesStore.map((item) => (item.id === editingId ? record : item))
+    : [...automationSourcesStore, record];
+  recordAudit("AUTOMATION", String(record.id), editingId ? "AUTOMATION_SOURCE_UPDATED" : "AUTOMATION_SOURCE_CREATED", {
+    topicId: record.topicId,
+  });
+  return { ...record };
+}
+
+export function mockDeleteAutomationSource(sourceId: number) {
+  const source = automationSourcesStore.find((item) => item.id === sourceId);
+  if (!source) {
+    throw new Error("Automation source not found.");
+  }
+  const isReferenced = Array.from(automationRunDetailsStore.values()).some((detail) =>
+    detail.snapshots.some((snapshot) => snapshot.sourceUrl === source.sourceUrl),
+  );
+  if (isReferenced) {
+    throw new Error("This source is already referenced by collected evidence. Disable it instead of deleting it.");
+  }
+  automationSourcesStore = automationSourcesStore.filter((item) => item.id !== sourceId);
+  recordAudit("AUTOMATION", String(sourceId), "AUTOMATION_SOURCE_DELETED", {});
+}
+
 export function mockAutomationSchedules(topicId: number) {
   return automationSchedulesStore.filter((item) => item.topicId === topicId).map((item) => ({ ...item }));
+}
+
+export function mockSaveAutomationSchedule(
+  topicId: number,
+  editingId: number | null,
+  request: AutomationScheduleUpsertRequest,
+) {
+  const now = new Date().toISOString();
+  const existing = editingId ? automationSchedulesStore.find((item) => item.id === editingId) : null;
+  const record: AutomationScheduleResponse = {
+    id: editingId ?? nextAutomationScheduleId++,
+    topicId: existing?.topicId ?? topicId,
+    name: request.name.trim(),
+    cronExpression: request.cronExpression.trim(),
+    timezone: request.timezone.trim(),
+    status: request.status,
+    misfirePolicy: request.misfirePolicy,
+    nextPlannedRunAt: existing?.status === "DISABLED" && request.status === "DISABLED" ? null : now,
+    syncStatus: "SYNCED",
+    syncErrorMessage: null,
+    lastSynchronizedAt: now,
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+
+  automationSchedulesStore = editingId
+    ? automationSchedulesStore.map((item) => (item.id === editingId ? record : item))
+    : [...automationSchedulesStore, record];
+  recordAudit(
+    "AUTOMATION",
+    String(record.id),
+    editingId ? "AUTOMATION_SCHEDULE_UPDATED" : "AUTOMATION_SCHEDULE_CREATED",
+    { topicId: record.topicId },
+  );
+  return { ...record };
+}
+
+export function mockDeleteAutomationSchedule(scheduleId: number) {
+  const schedule = automationSchedulesStore.find((item) => item.id === scheduleId);
+  if (!schedule) {
+    throw new Error("Automation schedule not found.");
+  }
+  const hasHistory = automationRunsStore.some((item) => item.scheduleId === scheduleId);
+  if (hasHistory) {
+    throw new Error("This schedule already has run history. Disable it instead of deleting it.");
+  }
+  automationSchedulesStore = automationSchedulesStore.filter((item) => item.id !== scheduleId);
+  recordAudit("AUTOMATION", String(scheduleId), "AUTOMATION_SCHEDULE_DELETED", {});
 }
 
 export function mockAutomationRuns() {
