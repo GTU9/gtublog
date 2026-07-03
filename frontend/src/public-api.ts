@@ -13,14 +13,15 @@ import { defaultRevalidateSeconds, isDevelopmentRuntime, publicApiBaseUrl } from
 type RequestOptions<T> = {
   fallback: T;
   devFallback?: T;
+  fresh?: boolean;
 };
 
-async function requestJson<T>(path: string, { fallback, devFallback }: RequestOptions<T>): Promise<T> {
+async function requestJson<T>(path: string, { fallback, devFallback, fresh }: RequestOptions<T>): Promise<T> {
   const url = `${publicApiBaseUrl}${path}`;
 
   try {
     const response = await fetch(url, {
-      next: { revalidate: defaultRevalidateSeconds },
+      ...(fresh ? { cache: "no-store" as const } : { next: { revalidate: defaultRevalidateSeconds } }),
       signal: AbortSignal.timeout(1500),
     });
 
@@ -42,6 +43,14 @@ export async function listPosts(page = 0, size = 12) {
   return requestJson<PostPage<PostSummary>>(`/posts?page=${page}&size=${size}`, {
     fallback: { items: [], page, size, totalElements: 0, totalPages: 0 },
     devFallback: mockPostsPage(page, size),
+  });
+}
+
+export async function listFreshPosts(page = 0, size = 12) {
+  return requestJson<PostPage<PostSummary>>(`/posts?page=${page}&size=${size}`, {
+    fallback: { items: [], page, size, totalElements: 0, totalPages: 0 },
+    devFallback: mockPostsPage(page, size),
+    fresh: true,
   });
 }
 
@@ -77,6 +86,14 @@ export async function getArchiveEntries() {
   return requestJson<ArchiveEntry[]>("/archive", {
     fallback: [],
     devFallback: mockArchiveEntries(),
+  });
+}
+
+export async function getFreshArchiveEntries() {
+  return requestJson<ArchiveEntry[]>("/archive", {
+    fallback: [],
+    devFallback: mockArchiveEntries(),
+    fresh: true,
   });
 }
 
