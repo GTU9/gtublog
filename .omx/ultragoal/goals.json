@@ -1,7 +1,7 @@
 {
   "version": 1,
   "createdAt": "2026-06-28T12:08:59.866Z",
-  "updatedAt": "2026-06-30T15:17:00.000Z",
+  "updatedAt": "2026-07-03T00:41:25.314Z",
   "briefPath": ".omx/ultragoal/brief.md",
   "goalsPath": ".omx/ultragoal/goals.json",
   "ledgerPath": ".omx/ultragoal/ledger.jsonl",
@@ -128,11 +128,13 @@
       "id": "G011-story-10-complete-release-hardening",
       "title": "Story 10 — Complete release hardening and full-system verification.",
       "objective": "Story 10 — Complete release hardening and full-system verification.\nAdd metrics, health checks, runbooks, backup/restore and restart drills, dependency/secret/static analysis, security headers, CI workflows, and production configuration documentation.\nPass backend checks, frontend and worker lint/typecheck/test/build, MySQL integration, contract tests, Playwright, compose validation, code review, architecture invariant audit, and adversarial UltraQA.",
-      "status": "in_progress",
+      "status": "complete",
       "attempt": 1,
       "createdAt": "2026-06-28T12:08:59.866Z",
-      "updatedAt": "2026-06-30T10:12:28.034Z",
-      "startedAt": "2026-06-30T10:12:28.034Z"
+      "updatedAt": "2026-07-03T00:41:25.314Z",
+      "startedAt": "2026-06-30T10:12:28.034Z",
+      "completedAt": "2026-07-03T00:41:25.314Z",
+      "evidence": "Fresh 2026-07-03 evidence closed Story 10 on the current head: pnpm quality, pnpm e2e:fullstack, pnpm drill:backup-restore, pnpm drill:restart-recovery, pnpm audit --prod --audit-level moderate, and MySQL recovery integration verification all passed; closure, code-review, architecture-audit, UltraQA, and drill evidence are recorded in .omx/reports/g011-*-20260703.md."
     },
     {
       "id": "G012-story-13-runnable-generation-worker",
@@ -145,8 +147,41 @@
       "startedAt": "2026-06-30T10:13:09.155Z",
       "completedAt": "2026-06-30T15:17:00.000Z",
       "evidence": "Story 13 issue #30 and PR #31 completed the runnable v2 worker, lease/idempotency hardening, runtime-bound canary gate, 60 worker tests, full pnpm quality, independent verifier/code/architecture approval, and UltraQA; merged into prototype at 5a13aa6."
+    },
+    {
+      "id": "G013-story-14-release-security-closure",
+      "title": "Story 14 - Release security closure and XSS boundary hardening",
+      "objective": "Implement the approved plan in .omx/plans/story-14-release-security-closure.md: strengthen release security baselines, harden sanitized content rendering and administrator preview boundaries, add browser security headers, and enforce dependency, secret, CodeQL, and worker image scans in CI.",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-07-02T23:29:38.890Z",
+      "updatedAt": "2026-07-02T23:29:38.890Z",
+      "completedAt": "2026-06-30T15:40:32.000Z",
+      "evidence": "Story 14 issue #32 and PR #33 added sanitized HTML/XSS defenses, response and Next security headers, dependency and secret scanning, CodeQL, hardened worker image scanning, and UltraQA; merged into prototype at f24a928."
+    },
+    {
+      "id": "G014-story-15-fullstack-e2e-foundation",
+      "title": "Story 15 - Real-service full-stack E2E foundation",
+      "objective": "Implement the approved plan in .omx/plans/story-15-fullstack-e2e.md: add real-service full-stack Playwright coverage against ephemeral MySQL, live Spring Boot, and production Next.js so release verification no longer relies only on mock-mode browser checks.",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-07-02T23:29:38.890Z",
+      "updatedAt": "2026-07-02T23:29:38.890Z",
+      "completedAt": "2026-07-01T09:08:33.000Z",
+      "evidence": "Story 15 issue #34 and PR #35 added the real-service full-stack E2E harness, ephemeral MySQL and RSA isolation, deterministic teardown across Windows and Linux, and UltraQA coverage; merged into prototype at d90b21f."
+    },
+    {
+      "id": "G015-story-16-automation-config-admin",
+      "title": "Story 16 - Automation configuration administration",
+      "objective": "Implement the approved plan in .omx/plans/story-16-automation-config-admin.md: complete safe administrator CRUD for automation topics, sources, and schedules, expose Quartz synchronization state, and keep held-run override semantics deferred until an approved change request defines them.",
+      "status": "complete",
+      "attempt": 1,
+      "createdAt": "2026-07-02T23:29:38.890Z",
+      "updatedAt": "2026-07-02T23:29:38.890Z",
+      "completedAt": "2026-07-02T07:08:35.000Z",
+      "evidence": "Story 16 issue #36 and PR #37 added admin CRUD for automation topics, sources, and schedules, conflict-safe disable guidance, persisted Quartz sync state, and verified backend/frontend quality gates; merged into prototype at 089aaea."
     }
   ],
   "codexObjective": "Complete the durable ultragoal plan in .omx/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .omx/ultragoal/ledger.jsonl as the audit trail.",
-  "activeGoalId": "G011-story-10-complete-release-hardening"
+  "activeGoalId": null
 }

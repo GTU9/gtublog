@@ -14,6 +14,7 @@
 
 Recommended local verification steps:
 
+0. Optional automation: run `pnpm drill:backup-restore` to execute the publish -> dump -> restore -> login/public/diagnostics verification flow with disposable MySQL 8.4 containers.
 1. Export MySQL schema and data with a timestamped dump.
 2. Restore into a fresh MySQL 8.4 instance.
 3. Run Flyway validation and application startup with `ddl-auto=validate`.
@@ -21,11 +22,14 @@ Recommended local verification steps:
 
 ## Restart drill
 
+Optional automation: run `pnpm drill:restart-recovery` to execute the pending-outbox replay across backend restart, compatible worker claim, and expired-run recovery flow on disposable infrastructure.
+
 1. Trigger a manual automation run.
 2. Restart the backend during or after outbox creation.
 3. Verify the run remains recoverable and pending outbox events can be replayed safely.
 4. Restart the generation worker and confirm the next compatible job can still be claimed.
 5. Force a test run lease into the past, execute the recovery sweep, and confirm the run becomes `FAILED`, its job becomes `CANCELLED`, and exactly one `AUTOMATION_RUN_RECOVERED_AS_FAILED` audit event exists.
+6. For deterministic operator recovery, an administrator may call `POST /api/v1/admin/automation/runs/{runId}/recovery`. For batch recovery, use `POST /api/v1/admin/automation/recovery/process`.
 
 ## Migration preflight
 

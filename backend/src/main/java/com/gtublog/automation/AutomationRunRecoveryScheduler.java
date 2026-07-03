@@ -5,7 +5,6 @@ import static org.quartz.SimpleScheduleBuilder.simpleSchedule;
 import static org.quartz.TriggerBuilder.newTrigger;
 
 import org.quartz.JobKey;
-import org.quartz.ObjectAlreadyExistsException;
 import org.quartz.Scheduler;
 import org.quartz.SchedulerException;
 import org.quartz.TriggerKey;
@@ -30,6 +29,12 @@ public class AutomationRunRecoveryScheduler implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         try {
+            if (scheduler.checkExists(TRIGGER_KEY)) {
+                scheduler.unscheduleJob(TRIGGER_KEY);
+            }
+            if (scheduler.checkExists(JOB_KEY)) {
+                scheduler.deleteJob(JOB_KEY);
+            }
             var job = newJob(AutomationRunRecoveryJob.class)
                     .withIdentity(JOB_KEY)
                     .storeDurably()
@@ -43,11 +48,7 @@ public class AutomationRunRecoveryScheduler implements ApplicationRunner {
                             .withIntervalInMilliseconds(automationProperties.run().recoveryInterval().toMillis())
                             .repeatForever())
                     .build();
-            try {
-                scheduler.scheduleJob(trigger);
-            } catch (ObjectAlreadyExistsException exception) {
-                scheduler.rescheduleJob(TRIGGER_KEY, trigger);
-            }
+            scheduler.scheduleJob(trigger);
         } catch (SchedulerException exception) {
             throw new IllegalStateException("Could not schedule automation run recovery.", exception);
         }

@@ -569,6 +569,84 @@ class AutomationPipelineIntegrationTests {
                 });
     }
 
+    @Test
+    void administratorCanForceRecoveryOfAnExpiredRunUsingDatabaseClock() throws Exception {
+        stubAccessibleSource("/recovery-endpoint-feed");
+        var bearerToken = bearerToken();
+
+        long topicId = jsonBody(mockMvc.perform(post("/api/v1/admin/automation/topics")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"Recovery Endpoint Topic",
+                                  "promptTemplateVersion":"v1",
+                                  "publicationEnabled":false
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn()).get("id").asLong();
+
+        mockMvc.perform(post("/api/v1/admin/automation/topics/{topicId}/sources", topicId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "sourceType":"HTML",
+                                  "sourceUrl":"%s",
+                                  "enabled":true
+                                }
+                                """.formatted(WIREMOCK.baseUrl() + "/recovery-endpoint-feed")))
+                .andExpect(status().isCreated());
+
+        long runId = jsonBody(mockMvc.perform(post("/api/v1/admin/automation/topics/{topicId}/runs/manual", topicId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"idempotencyKey":"story-17-recovery-endpoint"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()).get("id").asLong();
+
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/claim")
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, "worker-test-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "workerId":"worker-recovery-endpoint",
+                                  "supportedProviders":["fake-provider"],
+                                  "supportedSchemaVersions":["automation-job-v2"]
+                                }
+                                """))
+                .andExpect(status().isOk());
+
+        jdbcTemplate.update(
+                "UPDATE automation_run SET lease_expires_at = UTC_TIMESTAMP(6) - INTERVAL 5 MINUTE WHERE id = ?",
+                runId);
+
+        mockMvc.perform(post("/api/v1/admin/automation/runs/{runId}/recovery", runId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    var json = jsonBody(result);
+                    assertThat(json.get("runId").asLong()).isEqualTo(runId);
+                    assertThat(json.get("recovered").asBoolean()).isTrue();
+                });
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM automation_run WHERE id = ?",
+                String.class,
+                runId)).isEqualTo("FAILED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT job_status FROM generation_job WHERE run_id = ?",
+                String.class,
+                runId)).isEqualTo("CANCELLED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM audit_entry WHERE target_id = ? AND action_type = 'AUTOMATION_RUN_RECOVERED_AS_FAILED'",
+                Integer.class,
+                Long.toString(runId))).isEqualTo(1);
+    }
+
     private void stubAccessibleSource(String path) {
         WIREMOCK.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get(urlEqualTo(path))
                 .willReturn(aResponse()
