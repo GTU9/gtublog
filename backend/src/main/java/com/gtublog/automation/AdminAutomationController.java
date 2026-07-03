@@ -93,6 +93,11 @@ public class AdminAutomationController {
         return automationAdminService.runDetail(runId);
     }
 
+    @PostMapping("/runs/{runId}/recovery")
+    public AutomationRunRecoveryResponse recoverRun(@PathVariable Long runId) {
+        return automationAdminService.recoverRun(runId);
+    }
+
     @GetMapping("/diagnostics")
     public AutomationDiagnosticsResponse diagnostics() {
         return automationAdminService.diagnostics();
@@ -106,6 +111,11 @@ public class AdminAutomationController {
     @PostMapping("/outbox/process")
     public void processOutbox() {
         automationAdminService.processOutbox();
+    }
+
+    @PostMapping("/recovery/process")
+    public AutomationRecoveryProcessResponse processRecovery() {
+        return automationAdminService.processRecovery();
     }
 
     @PostMapping("/topics/{topicId}/runs/manual")

@@ -26,11 +26,12 @@ export default defineConfig({
       },
     },
     {
-      command: `pnpm --dir frontend build && pnpm --dir frontend start --port ${frontendPort}`,
+      command: "node scripts/start-fullstack-frontend.mjs",
       url: `http://127.0.0.1:${frontendPort}`,
       timeout: 180_000,
       reuseExistingServer: false,
       env: {
+        E2E_FRONTEND_PORT: frontendPort,
         NEXT_PUBLIC_GTUBLOG_ENABLE_DEV_MOCKS: "false",
         GTUBLOG_SITE_URL: `http://127.0.0.1:${frontendPort}`,
         GTUBLOG_PUBLIC_API_BASE_URL: `http://127.0.0.1:${backendPort}/api/v1/public`,

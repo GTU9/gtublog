@@ -68,8 +68,8 @@ try {
   const windows = process.platform === "win32";
   const command = windows ? process.env.ComSpec ?? "cmd.exe" : "pnpm";
   const args = windows
-    ? ["/d", "/s", "/c", "pnpm exec playwright test --config playwright.fullstack.config.ts"]
-    : ["exec", "playwright", "test", "--config", "playwright.fullstack.config.ts"];
+    ? ["/d", "/s", "/c", "pnpm exec playwright test --config playwright.fullstack.config.ts e2e/publishing.fullstack.spec.ts"]
+    : ["exec", "playwright", "test", "--config", "playwright.fullstack.config.ts", "e2e/publishing.fullstack.spec.ts"];
   playwright = spawn(command, args, {
     env,
     stdio: "inherit",

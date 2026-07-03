@@ -31,6 +31,9 @@ public interface AutomationRunRepository extends JpaRepository<AutomationRun, Lo
             """)
     List<Long> findExpiredRunIds(LocalDateTime now, Pageable pageable);
 
+    @Query(value = "SELECT UTC_TIMESTAMP(6)", nativeQuery = true)
+    LocalDateTime currentDatabaseUtc();
+
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select run from AutomationRun run where run.id = :id")
     Optional<AutomationRun> findByIdForUpdate(Long id);

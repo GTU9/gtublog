@@ -16,7 +16,9 @@
     "quality": "node scripts/verify-workspace.mjs",
     "quality:node": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "e2e": "playwright test",
-    "e2e:fullstack": "node scripts/run-fullstack-e2e.mjs"
+    "e2e:fullstack": "node scripts/run-fullstack-e2e.mjs",
+    "drill:backup-restore": "node scripts/run-backup-restore-drill.mjs",
+    "drill:restart-recovery": "node scripts/run-restart-recovery-drill.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.61.1",

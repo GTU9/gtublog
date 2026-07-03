@@ -35,6 +35,8 @@ public class AutomationAdminService {
     private final PublicationOutboxService publicationOutboxService;
     private final SourceUrlPolicy sourceUrlPolicy;
     private final AutomationRunLifecycleService automationRunLifecycleService;
+    private final AutomationRunRecoveryService automationRunRecoveryService;
+    private final AutomationRunRecoveryTransaction automationRunRecoveryTransaction;
 
     public AutomationAdminService(
             AutomationTopicRepository automationTopicRepository,
@@ -49,7 +51,9 @@ public class AutomationAdminService {
             GenerationJobService generationJobService,
             PublicationOutboxService publicationOutboxService,
             SourceUrlPolicy sourceUrlPolicy,
-            AutomationRunLifecycleService automationRunLifecycleService) {
+            AutomationRunLifecycleService automationRunLifecycleService,
+            AutomationRunRecoveryService automationRunRecoveryService,
+            AutomationRunRecoveryTransaction automationRunRecoveryTransaction) {
         this.automationTopicRepository = automationTopicRepository;
         this.automationSourceRepository = automationSourceRepository;
         this.automationScheduleRepository = automationScheduleRepository;
@@ -63,6 +67,8 @@ public class AutomationAdminService {
         this.publicationOutboxService = publicationOutboxService;
         this.sourceUrlPolicy = sourceUrlPolicy;
         this.automationRunLifecycleService = automationRunLifecycleService;
+        this.automationRunRecoveryService = automationRunRecoveryService;
+        this.automationRunRecoveryTransaction = automationRunRecoveryTransaction;
     }
 
     @Transactional(readOnly = true)
@@ -205,6 +211,11 @@ public class AutomationAdminService {
         return new AutomationRunDetailResponse(toRunResponse(run), snapshots);
     }
 
+    @Transactional
+    public AutomationRunRecoveryResponse recoverRun(Long runId) {
+        return new AutomationRunRecoveryResponse(runId, automationRunRecoveryTransaction.recover(runId, automationRunRepository.currentDatabaseUtc()));
+    }
+
     @Transactional(readOnly = true)
     public AutomationDiagnosticsResponse diagnostics() {
         var recentHoldReasons = automationRunRepository.findTop5ByStatusOrderByUpdatedAtDesc(AutomationRunStatus.HELD).stream()
@@ -238,6 +249,11 @@ public class AutomationAdminService {
     @Transactional
     public void processOutbox() {
         publicationOutboxService.processPendingEvents();
+    }
+
+    @Transactional
+    public AutomationRecoveryProcessResponse processRecovery() {
+        return new AutomationRecoveryProcessResponse(automationRunRecoveryService.recoverExpiredRuns());
     }
 
     public AutomationRunResponse triggerManualRun(Long topicId, String idempotencyKey) {

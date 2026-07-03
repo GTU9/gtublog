@@ -1,11 +1,11 @@
 import { expect, test } from "@playwright/test";
 
 test("real Spring, MySQL, and Next publish an administrator-authored post", async ({ page, request }) => {
-  const suffix = Date.now().toString(36);
-  const categoryName = `Full-stack ${suffix}`;
-  const categorySlug = `full-stack-${suffix}`;
-  const postTitle = `Full-stack published post ${suffix}`;
-  const postSlug = `full-stack-post-${suffix}`;
+  const suffix = process.env.E2E_POST_SUFFIX ?? Date.now().toString(36);
+  const categoryName = process.env.E2E_CATEGORY_NAME ?? `Full-stack ${suffix}`;
+  const categorySlug = process.env.E2E_CATEGORY_SLUG ?? `full-stack-${suffix}`;
+  const postTitle = process.env.E2E_POST_TITLE ?? `Full-stack published post ${suffix}`;
+  const postSlug = process.env.E2E_POST_SLUG ?? `full-stack-post-${suffix}`;
   const backendPort = process.env.E2E_BACKEND_PORT ?? "18080";
 
   await page.goto("/admin/login");
