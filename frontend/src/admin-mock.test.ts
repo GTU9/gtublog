@@ -5,6 +5,9 @@ import {
   mockAdminPosts,
   mockChangePostState,
   mockCreatePost,
+  mockAutomationSchedules,
+  mockAutomationSources,
+  mockAutomationTopics,
   mockDeleteAutomationSchedule,
   mockDeleteAutomationSource,
   mockDeleteCategory,
@@ -110,5 +113,42 @@ describe("admin mock state", () => {
 
     expect(() => mockDeleteAutomationSource(101)).toThrow(/Disable it instead of deleting it/);
     expect(() => mockDeleteAutomationSchedule(201)).toThrow(/Disable it instead of deleting it/);
+  });
+
+  it("updates automation topics, sources, and schedules while preserving safety metadata", () => {
+    const topic = mockSaveAutomationTopic(1, {
+      name: "AI Daily Briefing Updated",
+      slug: "ai-daily-briefing-updated",
+      promptTemplateVersion: "v3",
+      publicationEnabled: false,
+    });
+    const source = mockSaveAutomationSource(1, 102, {
+      sourceType: "HTML",
+      sourceUrl: "https://news.example.org/ai-updated",
+      enabled: false,
+    });
+    const schedule = mockSaveAutomationSchedule(1, 202, {
+      name: "Evening retry updated",
+      cronExpression: "0 30 20 * * *",
+      timezone: "Asia/Seoul",
+      status: "ACTIVE",
+      misfirePolicy: "FIRE_ONCE_NOW",
+    });
+
+    expect(topic.promptTemplateVersion).toBe("v3");
+    expect(topic.publicationEnabled).toBe(false);
+    expect(source.sourceUrl).toContain("ai-updated");
+    expect(source.enabled).toBe(false);
+    expect(schedule.syncStatus).toBe("SYNCED");
+    expect(schedule.syncErrorMessage).toBeNull();
+  });
+
+  it("exposes an out-of-sync schedule in the default automation fixtures", () => {
+    expect(mockAutomationTopics()).toHaveLength(1);
+    expect(mockAutomationSources(1).length).toBeGreaterThan(0);
+
+    const schedules = mockAutomationSchedules(1);
+    expect(schedules.some((schedule) => schedule.syncStatus === "OUT_OF_SYNC")).toBe(true);
+    expect(schedules.find((schedule) => schedule.syncStatus === "OUT_OF_SYNC")?.syncErrorMessage).toMatch(/Quartz synchronization failed/);
   });
 });

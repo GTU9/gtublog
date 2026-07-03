@@ -130,7 +130,7 @@ export function AutomationControlCenter({
       ) : null}
 
       <div className="admin-grid">
-        <article className="admin-card stack">
+        <article className="admin-card stack" aria-label="Automation topics panel">
           <div className="inline-actions">
             <h3>Automation topics</h3>
             {selectedTopicId ? (
@@ -211,7 +211,7 @@ export function AutomationControlCenter({
           </ul>
         </article>
 
-        <article className="admin-card stack">
+        <article className="admin-card stack" aria-label="Automation sources panel">
           <h3>Sources</h3>
           <p className="muted">
             {selectedTopic ? `Selected topic: ${selectedTopic.name}` : "Select a topic before editing source coverage."}
@@ -285,7 +285,7 @@ export function AutomationControlCenter({
           </ul>
         </article>
 
-        <article className="admin-card stack">
+        <article className="admin-card stack" aria-label="Automation schedules panel">
           <h3>Schedules</h3>
           <p className="muted">Use cron plus an IANA timezone. Once a schedule has history, disable it instead of deleting it.</p>
           <form className="stack" onSubmit={onScheduleSubmit}>
