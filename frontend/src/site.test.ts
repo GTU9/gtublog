@@ -4,7 +4,7 @@ import { absoluteUrl, siteDescription, siteName, siteUrl } from "./site";
 
 describe("site metadata", () => {
   it("provides non-empty public blog metadata", () => {
-    expect(siteName).toContain("Blog");
+    expect(siteName).toContain("블로그");
     expect(siteDescription.length).toBeGreaterThan(20);
   });
 

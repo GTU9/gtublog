@@ -1,7 +1,7 @@
 export const siteName = "지튜 블로그";
 export const siteDescription =
-  "자동 수집과 직접 검토를 바탕으로 다양한 주제를 정리해 발행하는 한국어 정보 블로그입니다.";
-export const siteTagline = "자동화로 모으고, 사람의 판단으로 정리하는 기록형 블로그";
+  "자동 수집과 직접 검토를 바탕으로 다양한 주제를 정리해 발행하는 1인 정보 블로그입니다.";
+export const siteTagline = "자동으로 모으고 사람의 판단으로 정리하는 기록형 블로그";
 
 export const siteUrl = (process.env.GTUBLOG_SITE_URL ?? "https://gtublog.dev").replace(/\/+$/, "");
 export const publicApiBaseUrl = (

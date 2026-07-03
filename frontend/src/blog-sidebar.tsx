@@ -1,11 +1,11 @@
 import Link from "next/link";
 
-import { getFreshArchiveEntries, listFreshPosts } from "@/src/public-api";
+import { getArchiveEntries, listPosts } from "@/src/public-api";
 
 export async function BlogSidebar() {
   const [recentPage, archiveEntries] = await Promise.all([
-    listFreshPosts(0, 5),
-    getFreshArchiveEntries(),
+    listPosts(0, 5),
+    getArchiveEntries(),
   ]);
 
   const categories = new Map<string, { slug: string; name: string }>();
@@ -29,13 +29,13 @@ export async function BlogSidebar() {
       <section className="sidebar-card">
         <h2>블로그 소개</h2>
         <p>
-          자동 수집한 자료를 그대로 쌓지 않고, 직접 검토와 정리를 거쳐 다시 읽기 쉬운 글로 남기는 개인 정보
+          자동 수집된 재료를 그대로 올리지 않고, 직접 검토와 정리를 거쳐 다시 읽기 쉬운 글로 옮기는 개인 정보
           블로그입니다.
         </p>
       </section>
 
       <section className="sidebar-card">
-        <h2>최근 글</h2>
+        <h2>최신 글</h2>
         {recentPage.items.length > 0 ? (
           <ul className="sidebar-list">
             {recentPage.items.map((post) => (
@@ -45,7 +45,7 @@ export async function BlogSidebar() {
             ))}
           </ul>
         ) : (
-          <p className="muted">아직 표시할 최근 글이 없습니다.</p>
+          <p className="muted">아직 표시할 최신 글이 없습니다.</p>
         )}
       </section>
 
@@ -86,7 +86,7 @@ export async function BlogSidebar() {
             {archiveItems.map((entry) => (
               <li key={`${entry.year}-${entry.month}`}>
                 <Link href="/archive">
-                  {entry.year}년 {entry.month}월 · {entry.count}개
+                  {entry.year}년 {entry.month}월 · 총 {entry.count}건
                 </Link>
               </li>
             ))}

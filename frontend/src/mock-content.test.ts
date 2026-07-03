@@ -10,7 +10,7 @@ describe("mock content fixtures", () => {
   it("supports taxonomy and search views from the same fixture source", () => {
     expect(mockCategoryPage("development").items.length).toBeGreaterThan(0);
     expect(mockTagPage("react").items.length).toBeGreaterThan(0);
-    expect(mockSearchPage("automation").items.length).toBeGreaterThan(0);
+    expect(mockSearchPage("자동화").items.length).toBeGreaterThan(0);
     expect(mockArchiveEntries().length).toBeGreaterThan(0);
   });
 });

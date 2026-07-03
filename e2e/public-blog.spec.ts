@@ -2,27 +2,31 @@ import { expect, test } from "@playwright/test";
 
 test("public blog routes render meaningful SSR content", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "GTU Automated Content Blog" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Home" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Why this blog uses Spring Boot for automated publishing" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "지튜 블로그" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "홈" })).toBeVisible();
+  await expect(
+    page.getByLabel("글 목록").getByRole("link", { name: "자동 발행 블로그에 Spring Boot를 선택한 이유" }),
+  ).toBeVisible();
 
-  await page.getByRole("link", { name: "Why this blog uses Spring Boot for automated publishing" }).click();
-  await expect(page.getByRole("heading", { name: "Why this blog uses Spring Boot for automated publishing" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Source links", exact: true })).toBeVisible();
+  await page.getByLabel("글 목록").getByRole("link", { name: "자동 발행 블로그에 Spring Boot를 선택한 이유" }).click();
+  await expect(page.getByRole("heading", { name: "자동 발행 블로그에 Spring Boot를 선택한 이유" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "출처 링크", exact: true })).toBeVisible();
 
   await page.goto("/categories/development");
-  await expect(page.getByRole("heading", { name: "Development category" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "개발 카테고리" })).toBeVisible();
 
   await page.goto("/tags/react");
-  await expect(page.getByRole("heading", { name: "React tag" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "React 태그" })).toBeVisible();
 
-  await page.goto("/search?q=automation");
-  await expect(page.getByRole("heading", { name: "Search" })).toBeVisible();
-  await expect(page.getByText("Why this blog uses Spring Boot for automated publishing")).toBeVisible();
+  await page.goto("/search?q=자동화");
+  await expect(page.getByRole("heading", { name: "검색" })).toBeVisible();
+  await expect(
+    page.getByLabel("글 목록").getByRole("link", { name: "자동 발행보다 먼저 필요한 것은 출처 검증" }),
+  ).toBeVisible();
 
   await page.goto("/archive");
-  await expect(page.getByRole("heading", { name: "Archive" })).toBeVisible();
-  await expect(page.getByText("2026 / 6")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "아카이브", level: 1 })).toBeVisible();
+  await expect(page.getByRole("link", { name: "2026년 6월 · 총 3건" })).toBeVisible();
 });
 
 test("rss, sitemap, and robots endpoints are exposed", async ({ request }) => {
