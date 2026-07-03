@@ -5,12 +5,12 @@ import type { ArchiveEntry, PostPage, PostSummary, TaxonomyItem } from "@/src/co
 
 function formatDate(value: string | null) {
   if (!value) {
-    return "Scheduled";
+    return "발행 예정";
   }
 
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat("ko-KR", {
     year: "numeric",
-    month: "long",
+    month: "2-digit",
     day: "numeric",
   }).format(new Date(value));
 }
@@ -18,25 +18,28 @@ function formatDate(value: string | null) {
 export function Shell({
   title,
   description,
+  aside,
   children,
 }: {
   title?: string;
   description?: string;
+  aside?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <div className="shell">
       <header className="site-header">
-        <div>
+        <div className="site-branding">
+          <span className="site-badge">자동화 큐레이션 블로그</span>
           <Link href="/" className="brand">
-            GTU BLOG
+            지튜 블로그
           </Link>
-          <p className="site-copy">A public knowledge blog for automated collection and curated editing.</p>
+          <p className="site-copy">자동 수집한 정보를 검토하고 정리해 한국어로 기록하는 개인 운영 블로그입니다.</p>
         </div>
-        <nav aria-label="Public blog navigation" className="site-nav">
-          <Link href="/">Home</Link>
-          <Link href="/archive">Archive</Link>
-          <Link href="/search">Search</Link>
+        <nav aria-label="공개 블로그 내비게이션" className="site-nav">
+          <Link href="/">홈</Link>
+          <Link href="/archive">아카이브</Link>
+          <Link href="/search">검색</Link>
           <Link href="/rss.xml">RSS</Link>
         </nav>
       </header>
@@ -48,11 +51,21 @@ export function Shell({
             {description ? <p>{description}</p> : null}
           </section>
         )}
-        {children}
+
+        {aside ? (
+          <div className="content-layout">
+            <section className="content-main">{children}</section>
+            <aside className="content-aside" aria-label="블로그 부가 정보">
+              {aside}
+            </aside>
+          </div>
+        ) : (
+          children
+        )}
       </main>
 
       <footer className="site-footer">
-        <p>Public blog prototype for verified content and automation-ready publishing.</p>
+        <p>자동 수집과 수동 검토를 함께 사용하는 기록형 블로그입니다.</p>
       </footer>
     </div>
   );
@@ -60,18 +73,12 @@ export function Shell({
 
 export function SearchForm({ defaultValue = "" }: { defaultValue?: string }) {
   return (
-    <form action="/search" method="get" className="search-form" role="search" aria-label="Search posts">
+    <form action="/search" method="get" className="search-form" role="search" aria-label="글 검색">
       <label htmlFor="search-query" className="sr-only">
-        Search query
+        검색어
       </label>
-      <input
-        id="search-query"
-        name="q"
-        type="search"
-        placeholder="Search by topic, tag, or keyword"
-        defaultValue={defaultValue}
-      />
-      <button type="submit">Search</button>
+      <input id="search-query" name="q" type="search" placeholder="제목, 카테고리, 태그, 키워드로 검색" defaultValue={defaultValue} />
+      <button type="submit">검색</button>
     </form>
   );
 }
@@ -91,7 +98,7 @@ export function PostGrid({
 
   return (
     <>
-      <section className="card-grid" aria-label="Post list">
+      <section className="card-grid" aria-label="글 목록">
         {page.items.map((post) => (
           <PostCard key={post.id} post={post} />
         ))}
@@ -106,18 +113,17 @@ export function PostCard({ post }: { post: PostSummary }) {
     <article className="post-card">
       <div className="card-meta">
         <span>{formatDate(post.firstPublishedAt)}</span>
-        <span>{post.viewCount} views</span>
+        <span>조회 {post.viewCount}</span>
       </div>
       <h2>
         <Link href={`/posts/${post.slug}`}>{post.title}</Link>
       </h2>
       <p>{post.excerpt}</p>
-      <TaxonomyList
-        items={post.categoryDetails ?? []}
-        label="Categories"
-        getHref={(item) => `/categories/${item.slug}`}
-      />
-      <TaxonomyList items={post.tagDetails ?? []} label="Tags" getHref={(item) => `/tags/${item.slug}`} />
+      <TaxonomyList items={post.categoryDetails ?? []} label="카테고리" getHref={(item) => `/categories/${item.slug}`} />
+      <TaxonomyList items={post.tagDetails ?? []} label="태그" getHref={(item) => `/tags/${item.slug}`} />
+      <div className="post-card-action">
+        <Link href={`/posts/${post.slug}`}>자세히 읽기</Link>
+      </div>
     </article>
   );
 }
@@ -163,9 +169,9 @@ export function Pagination({
   }
 
   return (
-    <nav className="pagination" aria-label="Pagination">
+    <nav className="pagination" aria-label="페이지 이동">
       <span>
-        Page {currentPage + 1} of {totalPages}
+        {currentPage + 1} / {totalPages} 페이지
       </span>
     </nav>
   );
@@ -173,22 +179,17 @@ export function Pagination({
 
 export function ArchiveList({ entries }: { entries: ArchiveEntry[] }) {
   if (entries.length === 0) {
-    return (
-      <EmptyState
-        title="No public archive is available yet."
-        description="Archive groups will appear here once public posts are published."
-      />
-    );
+    return <EmptyState title="아직 아카이브가 없습니다." description="발행된 글이 쌓이면 월별 아카이브가 이곳에 표시됩니다." />;
   }
 
   return (
-    <section className="stack" aria-label="Monthly archive">
+    <section className="stack" aria-label="월별 아카이브">
       {entries.map((entry) => (
         <article className="archive-card" key={`${entry.year}-${entry.month}`}>
           <h2>
-            {entry.year} / {entry.month}
+            {entry.year}년 {entry.month}월
           </h2>
-          <p>{entry.count} published posts</p>
+          <p>발행 글 {entry.count}개</p>
         </article>
       ))}
     </section>

@@ -11,7 +11,7 @@ export default function RootLayout({ children }: Readonly<{ children: ReactNode 
     <html lang="ko" data-scroll-behavior="smooth">
       <body>
         <a href="#main-content" className="skip-link">
-          Skip to main content
+          본문으로 바로가기
         </a>
         {children}
       </body>
