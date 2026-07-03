@@ -187,6 +187,21 @@ const initialAutomationSchedules: AutomationScheduleResponse[] = [
     createdAt: "2026-06-28T08:07:00Z",
     updatedAt: "2026-06-29T08:10:00Z",
   },
+  {
+    id: 202,
+    topicId: 1,
+    name: "Evening retry",
+    cronExpression: "0 0 20 * * *",
+    timezone: "Asia/Seoul",
+    status: "PAUSED",
+    misfirePolicy: "DO_NOTHING",
+    nextPlannedRunAt: "2026-06-30T11:00:00Z",
+    syncStatus: "OUT_OF_SYNC",
+    syncErrorMessage: "Quartz synchronization failed. Review the schedule and save it again after the scheduler recovers.",
+    lastSynchronizedAt: null,
+    createdAt: "2026-06-28T08:08:00Z",
+    updatedAt: "2026-06-29T08:30:00Z",
+  },
 ];
 let automationTopicsStore = initialAutomationTopics.map((item) => ({ ...item }));
 let automationSourcesStore = initialAutomationSources.map((item) => ({ ...item }));
