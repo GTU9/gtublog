@@ -7,6 +7,7 @@ import com.gtublog.observability.PlatformMetricsService;
 import java.time.LocalDateTime;
 import java.time.Clock;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
@@ -43,6 +44,16 @@ public class AutomationRunLifecycleService {
             Long scheduleId,
             String triggerType,
             String idempotencyKey) {
+        return start(topicId, scheduleId, null, triggerType, idempotencyKey);
+    }
+
+    @Transactional
+    public StartResult start(
+            Long topicId,
+            Long scheduleId,
+            Long retryOfRunId,
+            String triggerType,
+            String idempotencyKey) {
         var existing = automationRunRepository.findByIdempotencyKey(idempotencyKey);
         if (existing.isPresent()) {
             return new StartResult(existing.get(), false);
@@ -53,18 +64,25 @@ public class AutomationRunLifecycleService {
                 UUID.randomUUID().toString(),
                 topicId,
                 scheduleId,
+                retryOfRunId,
                 triggerType,
                 idempotencyKey,
                 DEFAULT_LEASE_OWNER,
                 now.plus(automationProperties.run().pipelineLeaseDuration()),
                 now));
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("triggerType", triggerType);
+        detail.put("topicId", topicId);
+        if (retryOfRunId != null) {
+            detail.put("retryOfRunId", retryOfRunId);
+        }
         auditService.record(
                 AuditActorType.ADMIN,
                 "1",
                 AuditTargetType.AUTOMATION,
                 run.getId().toString(),
                 "AUTOMATION_RUN_STARTED",
-                Map.of("triggerType", triggerType, "topicId", topicId));
+                detail);
         return new StartResult(run, true);
     }
 

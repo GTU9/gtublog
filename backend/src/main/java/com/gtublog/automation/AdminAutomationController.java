@@ -98,6 +98,21 @@ public class AdminAutomationController {
         return automationAdminService.recoverRun(runId);
     }
 
+    @PostMapping("/runs/{runId}/retry")
+    public AutomationRunResponse retryHeldRun(@PathVariable Long runId) {
+        return automationAdminService.retryHeldRun(runId);
+    }
+
+    @PostMapping("/runs/{runId}/cancel")
+    public AutomationRunResponse cancelRun(@PathVariable Long runId) {
+        return automationAdminService.cancelRun(runId);
+    }
+
+    @PostMapping("/runs/{runId}/override-publish")
+    public AutomationRunOverridePublishResponse overridePublishHeldRun(@PathVariable Long runId) {
+        return automationAdminService.overridePublishHeldRun(runId);
+    }
+
     @GetMapping("/diagnostics")
     public AutomationDiagnosticsResponse diagnostics() {
         return automationAdminService.diagnostics();

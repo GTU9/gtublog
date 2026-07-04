@@ -51,33 +51,36 @@ test("administrator can manage automation configuration and see safe conflict gu
   await page.getByRole("link", { name: "Automation" }).click();
   await expect(page.getByRole("heading", { name: "Automation", exact: true })).toBeVisible();
 
-  const defaultSourcesPanel = page.getByLabel("Automation sources panel");
-  await defaultSourcesPanel.getByRole("button", { name: "Delete" }).first().click({ force: true });
-  await expect(page.getByRole("heading", { name: "Automation unavailable", exact: true })).toBeVisible();
+  const defaultSourcesPanel = page.getByLabel("자동화 소스 패널");
+  await defaultSourcesPanel.getByRole("button", { name: "삭제" }).first().click({ force: true });
+  await expect(page.getByRole("heading", { name: "자동화 화면 오류", exact: true })).toBeVisible();
   await expect(page.getByText("This source is already referenced by collected evidence. Disable it instead of deleting it.", { exact: true })).toBeVisible();
 
-  const defaultSchedulesPanel = page.getByLabel("Automation schedules panel");
-  await defaultSchedulesPanel.getByRole("button", { name: "Delete" }).first().click({ force: true });
+  const defaultSchedulesPanel = page.getByLabel("자동화 스케줄 패널");
+  await defaultSchedulesPanel.getByRole("button", { name: "삭제" }).first().click({ force: true });
   await expect(page.getByText("This schedule already has run history. Disable it instead of deleting it.", { exact: true })).toBeVisible();
 
-  await page.getByRole("textbox", { name: "Name" }).nth(0).fill("Playwright Automation Topic");
-  await page.getByRole("textbox", { name: "Slug" }).nth(0).fill("playwright-automation-topic");
-  await page.getByRole("textbox", { name: "Prompt template version" }).fill("v2");
-  await page.getByRole("button", { name: "Create topic" }).click();
+  await page.getByRole("textbox", { name: "주제명" }).fill("Playwright Automation Topic");
+  await page.getByRole("textbox", { name: "슬러그" }).fill("playwright-automation-topic");
+  await page.getByRole("textbox", { name: "프롬프트 템플릿 버전" }).fill("v2");
+  await page.getByRole("button", { name: "주제 생성" }).click();
   await expect(page.getByRole("button", { name: "Playwright Automation Topic" })).toBeVisible();
 
   await page.getByRole("button", { name: "Playwright Automation Topic" }).click();
 
-  const sourcesPanel = page.getByLabel("Automation sources panel");
-  await sourcesPanel.getByRole("combobox", { name: "Source type" }).selectOption("HTML");
-  await sourcesPanel.getByRole("textbox", { name: "Source URL" }).fill("https://playwright.example.com/feed");
-  await sourcesPanel.getByRole("button", { name: "Add source" }).click();
+  const sourcesPanel = page.getByLabel("자동화 소스 패널");
+  await sourcesPanel.getByRole("combobox", { name: "소스 유형" }).selectOption("HTML");
+  await sourcesPanel.getByRole("textbox", { name: "소스 URL" }).fill("https://playwright.example.com/feed");
+  await sourcesPanel.getByRole("button", { name: "소스 추가" }).click();
   await expect(sourcesPanel.getByText("https://playwright.example.com/feed")).toBeVisible();
 
-  const schedulesPanel = page.getByLabel("Automation schedules panel");
-  await schedulesPanel.getByRole("textbox", { name: "Name" }).fill("Playwright schedule");
-  await schedulesPanel.getByRole("textbox", { name: "Cron expression" }).fill("0 15 10 * * *");
-  await schedulesPanel.getByRole("textbox", { name: "Timezone" }).fill("Asia/Seoul");
-  await schedulesPanel.getByRole("button", { name: "Add schedule" }).click();
+  const schedulesPanel = page.getByLabel("자동화 스케줄 패널");
+  await schedulesPanel.getByRole("textbox", { name: "스케줄명" }).fill("Playwright schedule");
+  await schedulesPanel.getByRole("textbox", { name: "Cron 표현식" }).fill("0 15 10 * * *");
+  await schedulesPanel.getByRole("textbox", { name: "시간대" }).fill("Asia/Seoul");
+  await schedulesPanel.getByRole("button", { name: "스케줄 추가" }).click();
   await expect(schedulesPanel.getByText("Playwright schedule")).toBeVisible();
+
+  await page.getByRole("button", { name: "상세보기" }).first().click();
+  await expect(page.getByRole("heading", { name: "선택한 실행 상세" })).toBeVisible();
 });

@@ -71,22 +71,22 @@ public class AutomationPublicationService {
             GenerationJobSubmitRequest request) {
         run.requireActive(now());
         var topic = automationTopicRepository.findById(run.getTopicId()).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
-        var citedSnapshots = resolveCitedSnapshots(run.getId(), request);
+        var citedSnapshots = resolveCitedSnapshots(run.getId(), request.draft().citationSnapshotIds());
 
         if (!topic.isPublicationEnabled()) {
-            run.markHeld("Automatic publication is disabled for this topic.", now());
+            run.markHeld(AutomationHoldReason.AUTOMATIC_PUBLICATION_DISABLED, now());
             recordDecision(run, "held", "publication_disabled");
-            return PublicationDecision.held("Automatic publication is disabled for this topic.");
+            return PublicationDecision.held(AutomationHoldReason.AUTOMATIC_PUBLICATION_DISABLED);
         }
         if (citedSnapshots.isEmpty() || citedSnapshots.stream().anyMatch(snapshot -> snapshot.getPolicyResult() != SourcePolicyResult.ALLOWED)) {
-            run.markHeld("One or more required source snapshots are inaccessible or blocked.", now());
+            run.markHeld(AutomationHoldReason.SOURCE_BLOCKED, now());
             recordDecision(run, "held", "source_blocked");
-            return PublicationDecision.held("One or more required source snapshots are inaccessible or blocked.");
+            return PublicationDecision.held(AutomationHoldReason.SOURCE_BLOCKED);
         }
         if (distinctOrigins(citedSnapshots) < 2) {
-            run.markHeld("Material claims require corroboration across at least two independent origin hosts.", now());
+            run.markHeld(AutomationHoldReason.INSUFFICIENT_ORIGINS, now());
             recordDecision(run, "held", "insufficient_origins");
-            return PublicationDecision.held("Material claims require corroboration across at least two independent origin hosts.");
+            return PublicationDecision.held(AutomationHoldReason.INSUFFICIENT_ORIGINS);
         }
 
         String fingerprint = fingerprint(topic.getId(), request.draft().contentMarkdown(), citedSnapshots);
@@ -96,33 +96,19 @@ public class AutomationPublicationService {
                 .toList();
         if (postRepository.existsBySourceFingerprint(fingerprint)
                 || (!canonicalUrls.isEmpty() && sourceSnapshotRepository.countPublishedCitationsForCanonicalUrls(canonicalUrls) > 0)) {
-            run.markHeld("A matching canonical source or content fingerprint has already been published.", now());
+            run.markHeld(AutomationHoldReason.DUPLICATE_PUBLICATION, now());
             recordDecision(run, "held", "duplicate");
-            return PublicationDecision.held("A matching canonical source or content fingerprint has already been published.");
+            return PublicationDecision.held(AutomationHoldReason.DUPLICATE_PUBLICATION);
         }
 
-        var slug = uniqueSlug(request.draft().title());
-        var post = postRepository.save(Post.draft(
-                slug,
+        var post = publishDraft(
                 request.draft().title(),
                 request.draft().excerpt(),
                 request.draft().contentMarkdown(),
-                sanitizeMarkdown(request.draft().contentMarkdown()),
-                fingerprint));
-        post.publish(now());
-        var revision = postRevisionRepository.save(PostRevision.create(
-                post.getId(),
-                1,
-                post.getTitle(),
-                post.getExcerpt(),
-                post.getContentMarkdown(),
-                post.getContentHtml(),
+                fingerprint,
+                citedSnapshots,
                 RevisionSource.AUTOMATION,
-                "Automatically generated from verified source snapshots."));
-        for (int index = 0; index < citedSnapshots.size(); index++) {
-            postRevisionSourceSnapshotRepository.linkCitation(revision.getId(), citedSnapshots.get(index).getId(), index + 1);
-        }
-        publicationOutboxService.enqueuePostPublished(post.getId(), post.getSlug());
+                "Automatically generated from verified source snapshots.");
         run.markSucceeded(now());
         recordDecision(run, "published", "published");
         auditService.record(
@@ -140,16 +126,91 @@ public class AutomationPublicationService {
         return PublicationDecision.published(post.getId(), post.getSlug());
     }
 
-    private List<SourceSnapshot> resolveCitedSnapshots(Long runId, GenerationJobSubmitRequest request) {
-        var requestedIds = request.draft().citationSnapshotIds() == null || request.draft().citationSnapshotIds().isEmpty()
+    @Transactional
+    public AutomationRunOverridePublishResponse publishAdminOverride(
+            GenerationJob job,
+            AutomationRun run,
+            AutomationRunDetailResponse.GeneratedDraftResponse draft) {
+        var topic = automationTopicRepository.findById(run.getTopicId()).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
+        var citedSnapshots = resolveCitedSnapshots(run.getId(), draft.citationSnapshotIds());
+        if (citedSnapshots.isEmpty() || citedSnapshots.stream().anyMatch(snapshot -> snapshot.getPolicyResult() != SourcePolicyResult.ALLOWED)) {
+            throw new IllegalStateException("Only runs with allowed stored source snapshots can be published manually.");
+        }
+        String fingerprint = fingerprint(topic.getId(), draft.contentMarkdown(), citedSnapshots);
+        var canonicalUrls = citedSnapshots.stream()
+                .map(SourceSnapshot::getCanonicalUrl)
+                .filter(url -> url != null && !url.isBlank())
+                .toList();
+        if (postRepository.existsBySourceFingerprint(fingerprint)
+                || (!canonicalUrls.isEmpty() && sourceSnapshotRepository.countPublishedCitationsForCanonicalUrls(canonicalUrls) > 0)) {
+            throw new IllegalStateException(AutomationHoldReason.DUPLICATE_PUBLICATION);
+        }
+        var post = publishDraft(
+                draft.title(),
+                draft.excerpt(),
+                draft.contentMarkdown(),
+                fingerprint,
+                citedSnapshots,
+                RevisionSource.AUTOMATION,
+                "Published manually from a held automation draft.");
+        auditService.record(
+                AuditActorType.ADMIN,
+                "1",
+                AuditTargetType.AUTOMATION,
+                run.getId().toString(),
+                "AUTOMATION_RUN_OVERRIDE_PUBLISHED",
+                Map.of(
+                        "runId", run.getId(),
+                        "jobId", job.getId(),
+                        "postId", post.getId(),
+                        "slug", post.getSlug(),
+                        "sourceFingerprint", fingerprint));
+        return new AutomationRunOverridePublishResponse(run.getId(), post.getId(), post.getSlug());
+    }
+
+    private List<SourceSnapshot> resolveCitedSnapshots(Long runId, List<Long> citationSnapshotIds) {
+        var requestedIds = citationSnapshotIds == null || citationSnapshotIds.isEmpty()
                 ? sourceSnapshotRepository.findAllByAutomationRunIdOrderByCreatedAtAsc(runId).stream().map(SourceSnapshot::getId).toList()
-                : request.draft().citationSnapshotIds();
+                : citationSnapshotIds;
         var snapshots = sourceSnapshotRepository.findAllById(requestedIds);
         var runScoped = snapshots.stream().filter(snapshot -> runId.equals(snapshot.getAutomationRunId())).toList();
         if (runScoped.size() != requestedIds.size()) {
             throw new IllegalArgumentException("Citation snapshot IDs must belong to the claimed automation run.");
         }
         return runScoped;
+    }
+
+    private Post publishDraft(
+            String title,
+            String excerpt,
+            String contentMarkdown,
+            String fingerprint,
+            List<SourceSnapshot> citedSnapshots,
+            RevisionSource revisionSource,
+            String revisionNote) {
+        var slug = uniqueSlug(title);
+        var post = postRepository.save(Post.draft(
+                slug,
+                title,
+                excerpt,
+                contentMarkdown,
+                sanitizeMarkdown(contentMarkdown),
+                fingerprint));
+        post.publish(now());
+        var revision = postRevisionRepository.save(PostRevision.create(
+                post.getId(),
+                1,
+                post.getTitle(),
+                post.getExcerpt(),
+                post.getContentMarkdown(),
+                post.getContentHtml(),
+                revisionSource,
+                revisionNote));
+        for (int index = 0; index < citedSnapshots.size(); index++) {
+            postRevisionSourceSnapshotRepository.linkCitation(revision.getId(), citedSnapshots.get(index).getId(), index + 1);
+        }
+        publicationOutboxService.enqueuePostPublished(post.getId(), post.getSlug());
+        return post;
     }
 
     private long distinctOrigins(List<SourceSnapshot> snapshots) {

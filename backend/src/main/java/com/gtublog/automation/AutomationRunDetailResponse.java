@@ -6,7 +6,22 @@ import java.util.List;
 
 public record AutomationRunDetailResponse(
         AutomationRunResponse run,
-        List<SourceSnapshotResponse> snapshots) {
+        List<SourceSnapshotResponse> snapshots,
+        GeneratedDraftResponse generatedDraft,
+        AvailableActionsResponse availableActions) {
+
+    public record GeneratedDraftResponse(
+            String title,
+            String excerpt,
+            String contentMarkdown,
+            List<Long> citationSnapshotIds) {
+    }
+
+    public record AvailableActionsResponse(
+            boolean canRetry,
+            boolean canCancel,
+            boolean canOverridePublish) {
+    }
 
     public record SourceSnapshotResponse(
             Long id,

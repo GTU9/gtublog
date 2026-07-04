@@ -6,8 +6,13 @@ import {
   mockChangePostState,
   mockCreatePost,
   mockAutomationSchedules,
+  mockAutomationRunCancel,
+  mockAutomationRunDetail,
+  mockAutomationRunOverridePublish,
+  mockAutomationRunRetry,
   mockAutomationSources,
   mockAutomationTopics,
+  mockTriggerAutomationRun,
   mockDeleteAutomationSchedule,
   mockDeleteAutomationSource,
   mockDeleteCategory,
@@ -150,5 +155,29 @@ describe("admin mock state", () => {
     const schedules = mockAutomationSchedules(1);
     expect(schedules.some((schedule) => schedule.syncStatus === "OUT_OF_SYNC")).toBe(true);
     expect(schedules.find((schedule) => schedule.syncStatus === "OUT_OF_SYNC")?.syncErrorMessage).toMatch(/Quartz synchronization failed/);
+  });
+
+  it("supports held-run retry and manual override actions in the automation mock", () => {
+    const heldDetail = mockAutomationRunDetail(302);
+    expect(heldDetail?.availableActions.canRetry).toBe(true);
+    expect(heldDetail?.availableActions.canOverridePublish).toBe(true);
+
+    const retried = mockAutomationRunRetry(302);
+    expect(retried.retryOfRunId).toBe(302);
+    expect(mockAutomationRunDetail(302)?.run.resolutionStatus).toBe("RETRIED");
+
+    resetAdminMockState();
+    const overrideResult = mockAutomationRunOverridePublish(302);
+    expect(overrideResult.postId).toBeGreaterThan(0);
+    expect(mockAutomationRunDetail(302)?.run.resolutionStatus).toBe("OVERRIDE_PUBLISHED");
+  });
+
+  it("cancels an active automation run in mock state", () => {
+    const running = mockTriggerAutomationRun(1);
+    const cancelled = mockAutomationRunCancel(running.id);
+
+    expect(cancelled.status).toBe("FAILED");
+    expect(cancelled.resolutionStatus).toBe("CANCELLED");
+    expect(cancelled.holdReason).toMatch(/administrator/i);
   });
 });

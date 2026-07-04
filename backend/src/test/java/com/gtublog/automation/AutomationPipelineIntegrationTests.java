@@ -15,6 +15,7 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
 import org.flywaydb.core.Flyway;
@@ -117,6 +118,12 @@ class AutomationPipelineIntegrationTests {
     private GenerationJobService generationJobService;
 
     @Autowired
+    private GenerationJobRepository generationJobRepository;
+
+    @Autowired
+    private TerminalPayloadDigester terminalPayloadDigester;
+
+    @Autowired
     private AutomationTopicRepository automationTopicRepository;
 
     @Autowired
@@ -133,6 +140,10 @@ class AutomationPipelineIntegrationTests {
     void resetState() {
         automationScheduleSynchronizer.clearAutomationSchedules();
         WIREMOCK.resetAll();
+        jdbcTemplate.update("DELETE FROM post_revision_source_snapshot");
+        jdbcTemplate.update("DELETE FROM publication_outbox_event");
+        jdbcTemplate.update("DELETE FROM post_revision");
+        jdbcTemplate.update("DELETE FROM post");
         jdbcTemplate.update("DELETE FROM source_snapshot");
         jdbcTemplate.update("DELETE FROM generation_job");
         jdbcTemplate.update("DELETE FROM automation_run");
@@ -647,6 +658,227 @@ class AutomationPipelineIntegrationTests {
                 Long.toString(runId))).isEqualTo(1);
     }
 
+    @Test
+    void administratorCanRetryAnUnresolvedHeldRunAndPreserveLineage() throws Exception {
+        var bearerToken = bearerToken();
+        long topicId = jsonBody(mockMvc.perform(post("/api/v1/admin/automation/topics")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"Retry Held Topic",
+                                  "promptTemplateVersion":"v1",
+                                  "publicationEnabled":true
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn()).get("id").asLong();
+
+        var heldRun = automationAdminService.triggerManualRun(topicId, "story-17-retry-held");
+        assertThat(heldRun.status()).isEqualTo(AutomationRunStatus.HELD);
+        assertThat(heldRun.holdReason()).isEqualTo(AutomationHoldReason.NO_ENABLED_SOURCES);
+
+        var retryResult = mockMvc.perform(post("/api/v1/admin/automation/runs/{runId}/retry", heldRun.id())
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        var retryJson = jsonBody(retryResult);
+        long retryRunId = retryJson.get("id").asLong();
+        assertThat(retryRunId).isNotEqualTo(heldRun.id());
+        assertThat(retryJson.get("retryOfRunId").asLong()).isEqualTo(heldRun.id());
+        assertThat(retryJson.get("status").asText()).isEqualTo("HELD");
+        assertThat(retryJson.get("holdReason").asText()).isEqualTo(AutomationHoldReason.NO_ENABLED_SOURCES);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT resolution_status FROM automation_run WHERE id = ?",
+                String.class,
+                heldRun.id())).isEqualTo("RETRIED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT retry_of_run_id FROM automation_run WHERE id = ?",
+                Long.class,
+                retryRunId)).isEqualTo(heldRun.id());
+    }
+
+    @Test
+    void administratorCanCancelAnActiveRunAndItsPendingGenerationJob() throws Exception {
+        stubAccessibleSource("/cancel-feed-a", "https://example.com/cancel-feed-a");
+        stubAccessibleSource("/cancel-feed-b", "https://example.org/cancel-feed-b");
+        var bearerToken = bearerToken();
+
+        long topicId = jsonBody(mockMvc.perform(post("/api/v1/admin/automation/topics")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"Cancel Running Topic",
+                                  "promptTemplateVersion":"v1",
+                                  "publicationEnabled":true
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn()).get("id").asLong();
+
+        mockMvc.perform(post("/api/v1/admin/automation/topics/{topicId}/sources", topicId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "sourceType":"HTML",
+                                  "sourceUrl":"%s",
+                                  "enabled":true
+                                }
+                                """.formatted(WIREMOCK.baseUrl() + "/cancel-feed-a")))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/api/v1/admin/automation/topics/{topicId}/sources", topicId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "sourceType":"HTML",
+                                  "sourceUrl":"%s",
+                                  "enabled":true
+                                }
+                                """.formatted(WIREMOCK.baseUrl().replace("localhost", "127.0.0.1") + "/cancel-feed-b")))
+                .andExpect(status().isCreated());
+
+        long runId = jsonBody(mockMvc.perform(post("/api/v1/admin/automation/topics/{topicId}/runs/manual", topicId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"idempotencyKey":"story-17-cancel-running"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()).get("id").asLong();
+
+        mockMvc.perform(post("/api/v1/admin/automation/runs/{runId}/cancel", runId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    var json = jsonBody(result);
+                    assertThat(json.get("status").asText()).isEqualTo("FAILED");
+                    assertThat(json.get("holdReason").asText()).isEqualTo(AutomationHoldReason.ADMINISTRATOR_CANCELLED);
+                    assertThat(json.get("resolutionStatus").asText()).isEqualTo("CANCELLED");
+                });
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM automation_run WHERE id = ?",
+                String.class,
+                runId)).isEqualTo("FAILED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT job_status FROM generation_job WHERE run_id = ?",
+                String.class,
+                runId)).isEqualTo("CANCELLED");
+    }
+
+    @Test
+    void administratorCanPublishAnEligibleHeldDraftManually() throws Exception {
+        stubAccessibleSource("/override-feed-a", "https://example.com/override-feed-a");
+        stubAccessibleSource("/override-feed-b", "https://example.org/override-feed-b");
+        var bearerToken = bearerToken();
+
+        long topicId = jsonBody(mockMvc.perform(post("/api/v1/admin/automation/topics")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "name":"Override Publish Topic",
+                                  "promptTemplateVersion":"prompt-v1",
+                                  "publicationEnabled":false
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn()).get("id").asLong();
+
+        mockMvc.perform(post("/api/v1/admin/automation/topics/{topicId}/sources", topicId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "sourceType":"HTML",
+                                  "sourceUrl":"%s",
+                                  "enabled":true
+                                }
+                                """.formatted(WIREMOCK.baseUrl() + "/override-feed-a")))
+                .andExpect(status().isCreated());
+        mockMvc.perform(post("/api/v1/admin/automation/topics/{topicId}/sources", topicId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "sourceType":"HTML",
+                                  "sourceUrl":"%s",
+                                  "enabled":true
+                                }
+                                """.formatted(WIREMOCK.baseUrl().replace("localhost", "127.0.0.1") + "/override-feed-b")))
+                .andExpect(status().isCreated());
+
+        long runId = jsonBody(mockMvc.perform(post("/api/v1/admin/automation/topics/{topicId}/runs/manual", topicId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"idempotencyKey":"story-17-override-publish"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn()).get("id").asLong();
+
+        var claimResult = mockMvc.perform(post("/api/v2/internal/generation-jobs/claim")
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, "worker-test-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "workerId":"worker-override",
+                                  "supportedProviders":["fake-provider"],
+                                  "supportedSchemaVersions":["automation-job-v2"]
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andReturn();
+        long firstSnapshotId = jsonBody(claimResult).at("/snapshots/0/snapshotId").asLong();
+        long secondSnapshotId = jsonBody(claimResult).at("/snapshots/1/snapshotId").asLong();
+
+        var generationJob = generationJobRepository.findByRunId(runId).orElseThrow();
+        mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", generationJob.getId())
+                        .header(GenerationWorkerController.WORKER_TOKEN_HEADER, "worker-test-token")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(successSubmitBody(
+                                "worker-override",
+                                "prompt-v1",
+                                "수동 발행 가능한 자동 초안",
+                                "자동 보류 후 수동 발행 테스트",
+                                "# 수동 발행 가능한 자동 초안\n\n본문입니다.",
+                                List.of(firstSnapshotId, secondSnapshotId))))
+                .andExpect(status().isAccepted());
+
+        mockMvc.perform(get("/api/v1/admin/automation/runs/{runId}", runId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    var json = jsonBody(result);
+                    assertThat(json.at("/run/status").asText()).isEqualTo("HELD");
+                    assertThat(json.at("/run/holdReason").asText()).isEqualTo(AutomationHoldReason.AUTOMATIC_PUBLICATION_DISABLED);
+                    assertThat(json.at("/availableActions/canOverridePublish").asBoolean()).isTrue();
+                    assertThat(json.at("/generatedDraft/title").asText()).isEqualTo("수동 발행 가능한 자동 초안");
+                });
+
+        var overrideResult = mockMvc.perform(post("/api/v1/admin/automation/runs/{runId}/override-publish", runId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        long postId = jsonBody(overrideResult).get("postId").asLong();
+        assertThat(postId).isGreaterThan(0L);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT resolution_status FROM automation_run WHERE id = ?",
+                String.class,
+                runId)).isEqualTo("OVERRIDE_PUBLISHED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT resolved_post_id FROM automation_run WHERE id = ?",
+                Long.class,
+                runId)).isEqualTo(postId);
+    }
+
     private void stubAccessibleSource(String path) {
         WIREMOCK.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get(urlEqualTo(path))
                 .willReturn(aResponse()
@@ -665,6 +897,61 @@ class AutomationPipelineIntegrationTests {
                                   </body>
                                 </html>
                                 """.formatted(path))));
+    }
+
+    private void stubAccessibleSource(String path, String canonicalUrl) {
+        WIREMOCK.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get(urlEqualTo(path))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "text/html; charset=utf-8")
+                        .withHeader("ETag", "\"feed-v1\"")
+                        .withHeader("Last-Modified", "Mon, 29 Jun 2026 12:00:00 GMT")
+                        .withBody("""
+                                <html>
+                                  <head>
+                                    <title>Collected source</title>
+                                    <link rel="canonical" href="%s" />
+                                  </head>
+                                  <body>
+                                    <article><p>Verified source content for automation collection.</p></article>
+                                  </body>
+                                </html>
+                                """.formatted(canonicalUrl))));
+    }
+
+    private String successSubmitBody(
+            String workerId,
+            String promptVersion,
+            String title,
+            String excerpt,
+            String contentMarkdown,
+            List<Long> citationSnapshotIds) throws Exception {
+        var requestWithoutDigest = new GenerationJobSubmitRequest(
+                UUID.randomUUID().toString(),
+                "0".repeat(64),
+                workerId,
+                "fake-provider",
+                promptVersion,
+                "automation-job-v2",
+                new GenerationJobSubmitRequest.GeneratedDraft(
+                        title,
+                        excerpt,
+                        contentMarkdown,
+                        citationSnapshotIds),
+                null);
+        return objectMapper.writeValueAsString(withCanonicalDigest(requestWithoutDigest));
+    }
+
+    private GenerationJobSubmitRequest withCanonicalDigest(GenerationJobSubmitRequest request) {
+        return new GenerationJobSubmitRequest(
+                request.terminalSubmissionId(),
+                terminalPayloadDigester.digest(request),
+                request.workerId(),
+                request.providerName(),
+                request.promptVersion(),
+                request.schemaVersion(),
+                request.draft(),
+                request.failureReason());
     }
 
     private JsonNode jsonBody(MvcResult result) throws Exception {

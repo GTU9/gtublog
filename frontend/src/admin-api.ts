@@ -15,6 +15,7 @@ import type {
   AutomationSourceUpsertRequest,
   AutomationTopicResponse,
   AutomationTopicUpsertRequest,
+  AutomationRunOverridePublishResponse,
   PostRevisionResponse,
   TaxonomyResponse,
 } from "@/src/admin-types";
@@ -31,6 +32,9 @@ import {
   mockAutomationDiagnostics,
   mockAutomationRunDetail,
   mockAutomationRuns,
+  mockAutomationRunCancel,
+  mockAutomationRunOverridePublish,
+  mockAutomationRunRetry,
   mockDeleteAutomationSchedule,
   mockDeleteAutomationSource,
   mockSaveAutomationSchedule,
@@ -519,6 +523,57 @@ export async function triggerAutomationRun(
       return mockTriggerAutomationRun(topicId);
     }
     throw new Error("Failed to trigger automation run.");
+  }
+}
+
+export async function retryAutomationRun(
+  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  runId: number,
+) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/runs/${runId}/retry`, {
+      method: "POST",
+    });
+    return await parseOrThrow<AutomationRunResponse>(response, "Failed to retry the held automation run.");
+  } catch {
+    if (isDevelopmentRuntime()) {
+      return mockAutomationRunRetry(runId);
+    }
+    throw new Error("Failed to retry the held automation run.");
+  }
+}
+
+export async function cancelAutomationRun(
+  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  runId: number,
+) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/runs/${runId}/cancel`, {
+      method: "POST",
+    });
+    return await parseOrThrow<AutomationRunResponse>(response, "Failed to cancel the automation run.");
+  } catch {
+    if (isDevelopmentRuntime()) {
+      return mockAutomationRunCancel(runId);
+    }
+    throw new Error("Failed to cancel the automation run.");
+  }
+}
+
+export async function overridePublishAutomationRun(
+  authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>,
+  runId: number,
+) {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/runs/${runId}/override-publish`, {
+      method: "POST",
+    });
+    return await parseOrThrow<AutomationRunOverridePublishResponse>(response, "Failed to publish the held draft manually.");
+  } catch {
+    if (isDevelopmentRuntime()) {
+      return mockAutomationRunOverridePublish(runId);
+    }
+    throw new Error("Failed to publish the held draft manually.");
   }
 }
 
