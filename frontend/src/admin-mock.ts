@@ -8,6 +8,7 @@ import type {
   AutomationDiagnosticsResponse,
   AutomationOutboxResponse,
   AutomationRunDetailResponse,
+  AutomationRunOverridePublishResponse,
   AutomationRunResponse,
   AutomationScheduleResponse,
   AutomationScheduleUpsertRequest,
@@ -209,111 +210,166 @@ let automationSchedulesStore = initialAutomationSchedules.map((item) => ({ ...it
 let nextAutomationTopicId = Math.max(...initialAutomationTopics.map((item) => item.id), 1) + 1;
 let nextAutomationSourceId = Math.max(...initialAutomationSources.map((item) => item.id), 100) + 1;
 let nextAutomationScheduleId = Math.max(...initialAutomationSchedules.map((item) => item.id), 200) + 1;
-let automationRunsStore: AutomationRunResponse[] = [
-  {
-    id: 301,
-    runKey: "run-301",
-    topicId: 1,
-    scheduleId: 201,
-    triggerType: "SCHEDULED",
-    status: "SUCCEEDED",
-    idempotencyKey: "schedule:201:2026-06-29T00:00:00Z",
-    holdReason: null,
-    snapshotCount: 2,
-    startedAt: "2026-06-29T00:00:00Z",
-    completedAt: "2026-06-29T00:00:11Z",
-    createdAt: "2026-06-29T00:00:00Z",
-    updatedAt: "2026-06-29T00:00:11Z",
-  },
-  {
-    id: 302,
-    runKey: "run-302",
-    topicId: 1,
-    scheduleId: null,
-    triggerType: "MANUAL",
-    status: "HELD",
-    idempotencyKey: "manual:1:held",
-    holdReason: "Distinct origin corroboration requires at least two allowed sources.",
-    snapshotCount: 1,
-    startedAt: "2026-06-29T04:00:00Z",
-    completedAt: "2026-06-29T04:00:05Z",
-    createdAt: "2026-06-29T04:00:00Z",
-    updatedAt: "2026-06-29T04:00:05Z",
-  },
-];
-const automationRunDetailsStore = new Map<number, AutomationRunDetailResponse>([
-  [
-    301,
+let automationRunsStore: AutomationRunResponse[] = createInitialAutomationRuns();
+let automationRunDetailsStore = createInitialAutomationRunDetails(automationRunsStore);
+let automationOutboxStore: AutomationOutboxResponse[] = createInitialAutomationOutbox();
+
+function createInitialAutomationRuns(): AutomationRunResponse[] {
+  return [
     {
-      run: automationRunsStore[0],
-      snapshots: [
-        {
-          id: 5001,
-          sourceUrl: "https://example.com/feed.xml",
-          canonicalUrl: "https://example.com/posts/ai-update",
-          originHost: "example.com",
-          title: "AI update from source one",
-          httpStatus: 200,
-          policyResult: "ALLOWED",
-          contentHash: "hash-1",
-          retrievedAt: "2026-06-29T00:00:02Z",
-        },
-        {
-          id: 5002,
-          sourceUrl: "https://news.example.org/ai",
-          canonicalUrl: "https://news.example.org/posts/ai-update",
-          originHost: "news.example.org",
-          title: "AI update from source two",
-          httpStatus: 200,
-          policyResult: "ALLOWED",
-          contentHash: "hash-2",
-          retrievedAt: "2026-06-29T00:00:03Z",
-        },
-      ],
+      id: 301,
+      runKey: "run-301",
+      topicId: 1,
+      scheduleId: 201,
+      retryOfRunId: null,
+      triggerType: "SCHEDULED",
+      status: "SUCCEEDED",
+      idempotencyKey: "schedule:201:2026-06-29T00:00:00Z",
+      holdReason: null,
+      resolutionStatus: null,
+      resolutionNote: null,
+      resolvedPostId: null,
+      snapshotCount: 2,
+      startedAt: "2026-06-29T00:00:00Z",
+      completedAt: "2026-06-29T00:00:11Z",
+      createdAt: "2026-06-29T00:00:00Z",
+      updatedAt: "2026-06-29T00:00:11Z",
     },
-  ],
-  [
-    302,
     {
-      run: automationRunsStore[1],
-      snapshots: [
-        {
-          id: 5003,
-          sourceUrl: "https://example.com/feed.xml",
-          canonicalUrl: "https://example.com/posts/duplicate-ai-update",
-          originHost: "example.com",
-          title: "Single-source duplicate candidate",
-          httpStatus: 200,
-          policyResult: "ALLOWED",
-          contentHash: "hash-3",
-          retrievedAt: "2026-06-29T04:00:01Z",
-        },
-      ],
+      id: 302,
+      runKey: "run-302",
+      topicId: 1,
+      scheduleId: null,
+      retryOfRunId: null,
+      triggerType: "MANUAL",
+      status: "HELD",
+      idempotencyKey: "manual:1:held",
+      holdReason: "Material claims require corroboration across at least two independent origin hosts.",
+      resolutionStatus: null,
+      resolutionNote: null,
+      resolvedPostId: null,
+      snapshotCount: 1,
+      startedAt: "2026-06-29T04:00:00Z",
+      completedAt: "2026-06-29T04:00:05Z",
+      createdAt: "2026-06-29T04:00:00Z",
+      updatedAt: "2026-06-29T04:00:05Z",
     },
-  ],
-]);
-let automationOutboxStore: AutomationOutboxResponse[] = [
-  {
-    id: 401,
-    aggregateId: 101,
-    deliveryStatus: "DELIVERED",
-    payloadJson: "{\"postId\":101,\"slug\":\"spring-boot-automation-blog\"}",
-    availableAt: "2026-06-29T00:00:11Z",
-    processedAt: "2026-06-29T00:00:12Z",
-    lastAttemptAt: "2026-06-29T00:00:12Z",
-    createdAt: "2026-06-29T00:00:11Z",
-  },
-  {
-    id: 402,
-    aggregateId: 102,
-    deliveryStatus: "PENDING",
-    payloadJson: "{\"postId\":102,\"slug\":\"ai-daily-briefing-2\"}",
-    availableAt: "2026-06-29T08:20:00Z",
-    processedAt: null,
-    lastAttemptAt: "2026-06-29T08:15:00Z",
-    createdAt: "2026-06-29T08:10:00Z",
-  },
-];
+  ];
+}
+
+function createInitialAutomationRunDetails(runs: AutomationRunResponse[]) {
+  return new Map<number, AutomationRunDetailResponse>([
+    [
+      301,
+      {
+        run: runs[0],
+        generatedDraft: null,
+        availableActions: {
+          canRetry: false,
+          canCancel: false,
+          canOverridePublish: false,
+        },
+        snapshots: [
+          {
+            id: 5001,
+            sourceUrl: "https://example.com/feed.xml",
+            canonicalUrl: "https://example.com/posts/ai-update",
+            originHost: "example.com",
+            title: "AI update from source one",
+            httpStatus: 200,
+            policyResult: "ALLOWED",
+            contentHash: "hash-1",
+            retrievedAt: "2026-06-29T00:00:02Z",
+          },
+          {
+            id: 5002,
+            sourceUrl: "https://news.example.org/ai",
+            canonicalUrl: "https://news.example.org/posts/ai-update",
+            originHost: "news.example.org",
+            title: "AI update from source two",
+            httpStatus: 200,
+            policyResult: "ALLOWED",
+            contentHash: "hash-2",
+            retrievedAt: "2026-06-29T00:00:03Z",
+          },
+        ],
+      },
+    ],
+    [
+      302,
+      {
+        run: runs[1],
+        generatedDraft: {
+          title: "보류된 자동 초안",
+          excerpt: "출처가 부족해서 자동 발행이 보류된 초안입니다.",
+          contentMarkdown: "# 보류된 자동 초안\n\n검토 후 수동 발행할 수 있습니다.",
+          citationSnapshotIds: [5003],
+        },
+        availableActions: {
+          canRetry: true,
+          canCancel: false,
+          canOverridePublish: true,
+        },
+        snapshots: [
+          {
+            id: 5003,
+            sourceUrl: "https://example.com/feed.xml",
+            canonicalUrl: "https://example.com/posts/duplicate-ai-update",
+            originHost: "example.com",
+            title: "Single-source duplicate candidate",
+            httpStatus: 200,
+            policyResult: "ALLOWED",
+            contentHash: "hash-3",
+            retrievedAt: "2026-06-29T04:00:01Z",
+          },
+        ],
+      },
+    ],
+  ]);
+}
+
+function createInitialAutomationOutbox(): AutomationOutboxResponse[] {
+  return [
+    {
+      id: 401,
+      aggregateId: 101,
+      deliveryStatus: "DELIVERED",
+      payloadJson: "{\"postId\":101,\"slug\":\"spring-boot-automation-blog\"}",
+      availableAt: "2026-06-29T00:00:11Z",
+      processedAt: "2026-06-29T00:00:12Z",
+      lastAttemptAt: "2026-06-29T00:00:12Z",
+      createdAt: "2026-06-29T00:00:11Z",
+    },
+    {
+      id: 402,
+      aggregateId: 102,
+      deliveryStatus: "PENDING",
+      payloadJson: "{\"postId\":102,\"slug\":\"ai-daily-briefing-2\"}",
+      availableAt: "2026-06-29T08:20:00Z",
+      processedAt: null,
+      lastAttemptAt: "2026-06-29T08:15:00Z",
+      createdAt: "2026-06-29T08:10:00Z",
+    },
+  ];
+}
+
+function cloneAutomationRun(run: AutomationRunResponse): AutomationRunResponse {
+  return { ...run };
+}
+
+function cloneAutomationRunDetail(detail: AutomationRunDetailResponse): AutomationRunDetailResponse {
+  return {
+    run: cloneAutomationRun(detail.run),
+    generatedDraft: detail.generatedDraft
+      ? {
+          ...detail.generatedDraft,
+          citationSnapshotIds: [...detail.generatedDraft.citationSnapshotIds],
+        }
+      : null,
+    availableActions: { ...detail.availableActions },
+    snapshots: detail.snapshots.map((snapshot) => ({ ...snapshot })),
+  };
+}
 
 function summarize(post: AdminPostDetail) {
   return {
@@ -395,6 +451,9 @@ export function resetAdminMockState() {
   nextAutomationTopicId = Math.max(...initialAutomationTopics.map((item) => item.id), 1) + 1;
   nextAutomationSourceId = Math.max(...initialAutomationSources.map((item) => item.id), 100) + 1;
   nextAutomationScheduleId = Math.max(...initialAutomationSchedules.map((item) => item.id), 200) + 1;
+  automationRunsStore = createInitialAutomationRuns();
+  automationRunDetailsStore = createInitialAutomationRunDetails(automationRunsStore);
+  automationOutboxStore = createInitialAutomationOutbox();
 }
 
 export function mockAutomationTopics() {
@@ -522,17 +581,12 @@ export function mockDeleteAutomationSchedule(scheduleId: number) {
 }
 
 export function mockAutomationRuns() {
-  return automationRunsStore.map((item) => ({ ...item }));
+  return automationRunsStore.map(cloneAutomationRun);
 }
 
 export function mockAutomationRunDetail(runId: number) {
   const detail = automationRunDetailsStore.get(runId);
-  return detail
-    ? {
-        run: { ...detail.run },
-        snapshots: detail.snapshots.map((item) => ({ ...item })),
-      }
-    : null;
+  return detail ? cloneAutomationRunDetail(detail) : null;
 }
 
 export function mockTriggerAutomationRun(topicId: number) {
@@ -542,19 +596,29 @@ export function mockTriggerAutomationRun(topicId: number) {
     runKey: `run-${Date.now()}`,
     topicId,
     scheduleId: null,
+    retryOfRunId: null,
     triggerType: "MANUAL",
-    status: "SUCCEEDED",
+    status: "RUNNING",
     idempotencyKey: `manual:${topicId}:${Date.now()}`,
     holdReason: null,
+    resolutionStatus: null,
+    resolutionNote: null,
+    resolvedPostId: null,
     snapshotCount: 2,
     startedAt: now,
-    completedAt: now,
+    completedAt: null,
     createdAt: now,
     updatedAt: now,
   };
   automationRunsStore = [run, ...automationRunsStore];
   automationRunDetailsStore.set(run.id, {
     run,
+    generatedDraft: null,
+    availableActions: {
+      canRetry: false,
+      canCancel: true,
+      canOverridePublish: false,
+    },
     snapshots: [
       {
         id: Date.now(),
@@ -582,6 +646,124 @@ export function mockTriggerAutomationRun(topicId: number) {
   });
   recordAudit("AUTOMATION", String(run.id), "AUTOMATION_RUN_STARTED", { topicId, triggerType: "MANUAL" });
   return { ...run };
+}
+
+export function mockAutomationRunRetry(runId: number) {
+  const original = automationRunsStore.find((item) => item.id === runId);
+  const originalDetail = automationRunDetailsStore.get(runId);
+  if (!original || !originalDetail || original.status !== "HELD" || original.resolutionStatus) {
+    throw new Error("Only unresolved held automation runs can be retried.");
+  }
+
+  const now = new Date().toISOString();
+  const retriedRun: AutomationRunResponse = {
+    ...cloneAutomationRun(original),
+    id: Math.max(...automationRunsStore.map((item) => item.id), 300) + 1,
+    runKey: `run-${Date.now()}`,
+    retryOfRunId: original.id,
+    idempotencyKey: `retry:${original.id}:${Date.now()}`,
+    resolutionStatus: null,
+    resolutionNote: null,
+    resolvedPostId: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const updatedOriginal: AutomationRunResponse = {
+    ...original,
+    resolutionStatus: "RETRIED",
+    resolutionNote: `Retried as run ${retriedRun.id}`,
+    updatedAt: now,
+  };
+
+  automationRunsStore = [retriedRun, ...automationRunsStore.map((item) => (item.id === runId ? updatedOriginal : item))];
+  automationRunDetailsStore.set(runId, {
+    ...cloneAutomationRunDetail(originalDetail),
+    run: updatedOriginal,
+    availableActions: {
+      canRetry: false,
+      canCancel: false,
+      canOverridePublish: false,
+    },
+  });
+  automationRunDetailsStore.set(retriedRun.id, {
+    ...cloneAutomationRunDetail(originalDetail),
+    run: retriedRun,
+  });
+  recordAudit("AUTOMATION", String(runId), "AUTOMATION_RUN_RETRIED", { retryRunId: retriedRun.id });
+  return cloneAutomationRun(retriedRun);
+}
+
+export function mockAutomationRunCancel(runId: number) {
+  const run = automationRunsStore.find((item) => item.id === runId);
+  const detail = automationRunDetailsStore.get(runId);
+  if (!run || !detail || run.status !== "RUNNING") {
+    throw new Error("Only active automation runs can be cancelled.");
+  }
+
+  const now = new Date().toISOString();
+  const cancelledRun: AutomationRunResponse = {
+    ...run,
+    status: "FAILED",
+    holdReason: "Cancelled by the administrator.",
+    resolutionStatus: "CANCELLED",
+    resolutionNote: "Cancelled by the administrator.",
+    completedAt: now,
+    updatedAt: now,
+  };
+
+  automationRunsStore = automationRunsStore.map((item) => (item.id === runId ? cancelledRun : item));
+  automationRunDetailsStore.set(runId, {
+    ...cloneAutomationRunDetail(detail),
+    run: cancelledRun,
+    availableActions: {
+      canRetry: false,
+      canCancel: false,
+      canOverridePublish: false,
+    },
+  });
+  recordAudit("AUTOMATION", String(runId), "AUTOMATION_RUN_CANCELLED", {});
+  return cloneAutomationRun(cancelledRun);
+}
+
+export function mockAutomationRunOverridePublish(runId: number): AutomationRunOverridePublishResponse {
+  const run = automationRunsStore.find((item) => item.id === runId);
+  const detail = automationRunDetailsStore.get(runId);
+  if (!run || !detail || !detail.availableActions.canOverridePublish || !detail.generatedDraft) {
+    throw new Error("Only approved held automation runs with a stored draft can be published manually.");
+  }
+
+  const now = new Date().toISOString();
+  const post = mockCreatePost({
+    slug: "",
+    title: detail.generatedDraft.title,
+    excerpt: detail.generatedDraft.excerpt,
+    contentMarkdown: detail.generatedDraft.contentMarkdown,
+    contentHtml: previewHtmlFromMarkdown(detail.generatedDraft.contentMarkdown),
+    categoryIds: [2],
+    tagIds: [12],
+    revisionNote: "자동화 보류 초안을 관리자가 수동 발행",
+  });
+  mockChangePostState(post.id, "publish");
+
+  const publishedRun: AutomationRunResponse = {
+    ...run,
+    resolutionStatus: "OVERRIDE_PUBLISHED",
+    resolutionNote: `Published manually as post ${post.id}`,
+    resolvedPostId: post.id,
+    updatedAt: now,
+  };
+  automationRunsStore = automationRunsStore.map((item) => (item.id === runId ? publishedRun : item));
+  automationRunDetailsStore.set(runId, {
+    ...cloneAutomationRunDetail(detail),
+    run: publishedRun,
+    availableActions: {
+      canRetry: false,
+      canCancel: false,
+      canOverridePublish: false,
+    },
+  });
+  recordAudit("AUTOMATION", String(runId), "AUTOMATION_RUN_OVERRIDE_PUBLISHED", { postId: post.id, slug: post.slug });
+  return { runId, postId: post.id, slug: post.slug };
 }
 
 export function mockAutomationOutbox() {

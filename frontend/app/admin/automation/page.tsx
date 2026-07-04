@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
+  cancelAutomationRun,
   deleteAutomationSchedule,
   deleteAutomationSource,
   fetchAutomationDiagnostics,
@@ -12,7 +13,9 @@ import {
   fetchAutomationSchedules,
   fetchAutomationSources,
   fetchAutomationTopics,
+  overridePublishAutomationRun,
   processAutomationOutbox,
+  retryAutomationRun,
   saveAutomationSchedule,
   saveAutomationSource,
   saveAutomationTopic,
@@ -67,6 +70,7 @@ export default function AdminAutomationPage() {
   const [diagnostics, setDiagnostics] = useState<AutomationDiagnosticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [actionPending, setActionPending] = useState<null | "retry" | "cancel" | "override">(null);
   const [processingOutboxState, setProcessingOutboxState] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -151,7 +155,7 @@ export default function AdminAutomationPage() {
           setRunDetail(await fetchAutomationRunDetail(auth.authenticatedFetch, nextRuns[0].id));
         }
       } catch {
-        setError("Unable to load automation controls right now.");
+        setError("자동화 운영 화면을 불러오지 못했습니다.");
       } finally {
         setLoading(false);
       }
@@ -170,7 +174,7 @@ export default function AdminAutomationPage() {
         await refreshTopicDetails(effectiveTopicId);
       } catch {
         if (active) {
-          setError("Unable to load topic automation details.");
+          setError("선택한 주제의 자동화 세부 정보를 불러오지 못했습니다.");
         }
       }
     })();
@@ -202,9 +206,9 @@ export default function AdminAutomationPage() {
     try {
       const run = await triggerAutomationRun(auth.authenticatedFetch, topicId);
       await refreshRunsAndOutbox(run.id);
-      setMessage("Automation run completed and the latest result has been loaded.");
+      setMessage("자동화 실행을 시작했고 최신 실행 결과를 불러왔습니다.");
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to trigger the automation run.");
+      setError(error instanceof Error ? error.message : "자동화 실행을 시작하지 못했습니다.");
     } finally {
       setRunning(false);
     }
@@ -216,7 +220,7 @@ export default function AdminAutomationPage() {
     try {
       setRunDetail(await fetchAutomationRunDetail(auth.authenticatedFetch, runId));
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to load the selected run detail.");
+      setError(error instanceof Error ? error.message : "선택한 실행 상세 정보를 불러오지 못했습니다.");
     }
   }
 
@@ -227,11 +231,56 @@ export default function AdminAutomationPage() {
     try {
       await processAutomationOutbox(auth.authenticatedFetch);
       await refreshRunsAndOutbox(runDetail?.run.id);
-      setMessage("Pending publication recovery events were replayed.");
+      setMessage("대기 중이던 발행 복구 이벤트를 다시 처리했습니다.");
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to process publication recovery events.");
+      setError(error instanceof Error ? error.message : "발행 복구 이벤트를 처리하지 못했습니다.");
     } finally {
       setProcessingOutboxState(false);
+    }
+  }
+
+  async function handleRetryRun(runId: number) {
+    setActionPending("retry");
+    setMessage(null);
+    setError(null);
+    try {
+      const run = await retryAutomationRun(auth.authenticatedFetch, runId);
+      await refreshRunsAndOutbox(run.id);
+      setMessage("보류된 실행을 재시도했습니다.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "보류된 실행을 재시도하지 못했습니다.");
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  async function handleCancelRun(runId: number) {
+    setActionPending("cancel");
+    setMessage(null);
+    setError(null);
+    try {
+      const run = await cancelAutomationRun(auth.authenticatedFetch, runId);
+      await refreshRunsAndOutbox(run.id);
+      setMessage("실행 중인 자동화를 취소했습니다.");
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "자동화 실행을 취소하지 못했습니다.");
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  async function handleOverridePublish(runId: number) {
+    setActionPending("override");
+    setMessage(null);
+    setError(null);
+    try {
+      const result = await overridePublishAutomationRun(auth.authenticatedFetch, runId);
+      await refreshRunsAndOutbox(runId);
+      setMessage(`보류된 초안을 수동 발행했습니다. 게시글 슬러그: ${result.slug}`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "보류된 초안을 수동 발행하지 못했습니다.");
+    } finally {
+      setActionPending(null);
     }
   }
 
@@ -287,7 +336,7 @@ export default function AdminAutomationPage() {
       resetTopicForm();
       setMessage(topicForm.editingId ? "Automation topic updated." : "Automation topic created.");
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to save the automation topic.");
+      setError(error instanceof Error ? error.message : "자동화 주제를 저장하지 못했습니다.");
       setTopicForm((current) => ({ ...current, saving: false }));
       return;
     }
@@ -297,7 +346,7 @@ export default function AdminAutomationPage() {
   async function handleSourceSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (effectiveTopicId == null) {
-      setError("Select a topic before saving sources.");
+      setError("소스를 저장하기 전에 주제를 먼저 선택하세요.");
       return;
     }
     const formData = new FormData(event.currentTarget);
@@ -312,9 +361,9 @@ export default function AdminAutomationPage() {
       });
       await refreshTopicDetails(effectiveTopicId);
       resetSourceForm();
-      setMessage(sourceForm.editingId ? "Automation source updated." : "Automation source added.");
+      setMessage(sourceForm.editingId ? "자동화 소스를 수정했습니다." : "자동화 소스를 추가했습니다.");
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to save the automation source.");
+      setError(error instanceof Error ? error.message : "자동화 소스를 저장하지 못했습니다.");
       setSourceForm((current) => ({ ...current, saving: false }));
       return;
     }
@@ -324,7 +373,7 @@ export default function AdminAutomationPage() {
   async function handleScheduleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (effectiveTopicId == null) {
-      setError("Select a topic before saving schedules.");
+      setError("스케줄을 저장하기 전에 주제를 먼저 선택하세요.");
       return;
     }
     const formData = new FormData(event.currentTarget);
@@ -341,9 +390,9 @@ export default function AdminAutomationPage() {
       });
       await refreshTopicDetails(effectiveTopicId);
       resetScheduleForm();
-      setMessage(scheduleForm.editingId ? "Automation schedule updated." : "Automation schedule added.");
+      setMessage(scheduleForm.editingId ? "자동화 스케줄을 수정했습니다." : "자동화 스케줄을 추가했습니다.");
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to save the automation schedule.");
+      setError(error instanceof Error ? error.message : "자동화 스케줄을 저장하지 못했습니다.");
       setScheduleForm((current) => ({ ...current, saving: false }));
       return;
     }
@@ -359,9 +408,9 @@ export default function AdminAutomationPage() {
       if (sourceForm.editingId === sourceId) {
         resetSourceForm();
       }
-      setMessage("Automation source deleted.");
+      setMessage("자동화 소스를 삭제했습니다.");
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to delete the automation source.");
+      setError(error instanceof Error ? error.message : "자동화 소스를 삭제하지 못했습니다.");
     }
   }
 
@@ -374,9 +423,9 @@ export default function AdminAutomationPage() {
       if (scheduleForm.editingId === scheduleId) {
         resetScheduleForm();
       }
-      setMessage("Automation schedule deleted.");
+      setMessage("자동화 스케줄을 삭제했습니다.");
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Unable to delete the automation schedule.");
+      setError(error instanceof Error ? error.message : "자동화 스케줄을 삭제하지 못했습니다.");
     }
   }
 
@@ -384,12 +433,12 @@ export default function AdminAutomationPage() {
     <section className="stack">
       <AdminPageHeader
         title="Automation"
-        description="Monitor collection runs, inspect publication holds, and replay recovery events from one administrator surface."
+        description="수집 실행 상태를 추적하고, 보류 사유를 검토하고, 복구 이벤트를 다시 처리하는 관리자 화면입니다."
       />
-      {error ? <MessageCard title="Automation unavailable" description={error} tone="error" /> : null}
-      {message ? <MessageCard title="Automation updated" description={message} tone="success" /> : null}
+      {error ? <MessageCard title="자동화 화면 오류" description={error} tone="error" /> : null}
+      {message ? <MessageCard title="자동화 작업 완료" description={message} tone="success" /> : null}
       {loading ? (
-        <LoadingCard message="Loading automation controls..." />
+        <LoadingCard message="자동화 운영 화면을 불러오는 중입니다..." />
       ) : (
         <AutomationControlCenter
           diagnostics={diagnostics}
@@ -401,6 +450,7 @@ export default function AdminAutomationPage() {
           runDetail={runDetail}
           outbox={outbox}
           running={running}
+          actionPending={actionPending}
           processingOutbox={processingOutboxState}
           topicForm={topicForm}
           sourceForm={sourceForm}
@@ -419,6 +469,9 @@ export default function AdminAutomationPage() {
           onScheduleReset={resetScheduleForm}
           onTriggerRun={handleTriggerRun}
           onSelectRun={handleSelectRun}
+          onRetryRun={handleRetryRun}
+          onCancelRun={handleCancelRun}
+          onOverridePublish={handleOverridePublish}
           onProcessOutbox={handleProcessOutbox}
         />
       )}

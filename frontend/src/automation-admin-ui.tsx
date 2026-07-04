@@ -12,12 +12,12 @@ import type {
 
 function formatDateTime(value: string | null) {
   if (!value) {
-    return "Not scheduled";
+    return "없음";
   }
 
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat("ko-KR", {
     year: "numeric",
-    month: "short",
+    month: "long",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
@@ -34,6 +34,7 @@ export function AutomationControlCenter({
   runDetail,
   outbox,
   running,
+  actionPending,
   processingOutbox,
   topicForm,
   sourceForm,
@@ -52,6 +53,9 @@ export function AutomationControlCenter({
   onScheduleReset,
   onTriggerRun,
   onSelectRun,
+  onRetryRun,
+  onCancelRun,
+  onOverridePublish,
   onProcessOutbox,
 }: {
   diagnostics: AutomationDiagnosticsResponse | null;
@@ -63,6 +67,7 @@ export function AutomationControlCenter({
   runDetail: AutomationRunDetailResponse | null;
   outbox: AutomationOutboxResponse[];
   running: boolean;
+  actionPending: null | "retry" | "cancel" | "override";
   processingOutbox: boolean;
   topicForm: {
     editingId: number | null;
@@ -102,6 +107,9 @@ export function AutomationControlCenter({
   onScheduleReset: () => void;
   onTriggerRun: (topicId: number) => void;
   onSelectRun: (runId: number) => void;
+  onRetryRun: (runId: number) => void;
+  onCancelRun: (runId: number) => void;
+  onOverridePublish: (runId: number) => void;
   onProcessOutbox: () => void;
 }) {
   const selectedTopic = topics.find((topic) => topic.id === selectedTopicId) ?? null;
@@ -111,51 +119,51 @@ export function AutomationControlCenter({
       {diagnostics ? (
         <div className="admin-stats">
           <article className="admin-card">
-            <h3>Runs succeeded</h3>
+            <h3>성공한 실행</h3>
             <p className="stat-value">{diagnostics.runCounts.succeeded}</p>
           </article>
           <article className="admin-card">
-            <h3>Runs held</h3>
+            <h3>보류된 실행</h3>
             <p className="stat-value">{diagnostics.runCounts.held}</p>
           </article>
           <article className="admin-card">
-            <h3>Jobs pending</h3>
+            <h3>대기 중 작업</h3>
             <p className="stat-value">{diagnostics.jobCounts.pending}</p>
           </article>
           <article className="admin-card">
-            <h3>Outbox pending</h3>
+            <h3>대기 중 아웃박스</h3>
             <p className="stat-value">{diagnostics.outboxCounts.pending}</p>
           </article>
         </div>
       ) : null}
 
       <div className="admin-grid">
-        <article className="admin-card stack" aria-label="Automation topics panel">
+        <article className="admin-card stack" aria-label="자동화 주제 패널">
           <div className="inline-actions">
-            <h3>Automation topics</h3>
+            <h3>자동화 주제</h3>
             {selectedTopicId ? (
               <button type="button" onClick={() => onTriggerRun(selectedTopicId)} disabled={running}>
-                {running ? "Running..." : "Run now"}
+                {running ? "실행 중..." : "지금 실행"}
               </button>
             ) : null}
           </div>
-          <p className="muted">Create topics for automated post families, then attach source coverage and schedules to the selected topic.</p>
+          <p className="muted">자동 수집/작성 주제를 만들고, 해당 주제에 소스와 스케줄을 연결하세요.</p>
           <form className="stack" onSubmit={onTopicSubmit}>
             <label className="field">
-              <span>Name</span>
+              <span>주제명</span>
               <input name="name" defaultValue={topicForm.name} key={`topic-name-${topicForm.editingId ?? "new"}-${topicForm.name}`} required />
             </label>
             <label className="field">
-              <span>Slug</span>
+              <span>슬러그</span>
               <input
                 name="slug"
                 defaultValue={topicForm.slug}
                 key={`topic-slug-${topicForm.editingId ?? "new"}-${topicForm.slug}`}
-                placeholder="leave blank to auto-generate"
+                placeholder="비워두면 자동 생성"
               />
             </label>
             <label className="field">
-              <span>Prompt template version</span>
+              <span>프롬프트 템플릿 버전</span>
               <input
                 name="promptTemplateVersion"
                 defaultValue={topicForm.promptTemplateVersion}
@@ -170,15 +178,15 @@ export function AutomationControlCenter({
                 defaultChecked={topicForm.publicationEnabled}
                 key={`topic-publication-${topicForm.editingId ?? "new"}-${topicForm.publicationEnabled}`}
               />
-              <span>Allow automatic publication when all gates pass</span>
+              <span>모든 검증 통과 시 자동 발행 허용</span>
             </label>
             <div className="inline-actions">
               <button type="submit" disabled={topicForm.saving}>
-                {topicForm.saving ? "Saving..." : topicForm.editingId ? "Update topic" : "Create topic"}
+                {topicForm.saving ? "저장 중..." : topicForm.editingId ? "주제 수정" : "주제 생성"}
               </button>
               {topicForm.editingId ? (
                 <button type="button" className="secondary-button" onClick={onTopicReset}>
-                  Clear editing state
+                  편집 취소
                 </button>
               ) : null}
             </div>
@@ -191,18 +199,18 @@ export function AutomationControlCenter({
                     {topic.name}
                   </button>
                   <p className="muted">
-                    {topic.slug} - {topic.publicationEnabled ? "publication on" : "publication off"} - prompt {topic.promptTemplateVersion}
+                    {topic.slug} · {topic.publicationEnabled ? "자동 발행 켜짐" : "자동 발행 꺼짐"} · 프롬프트 {topic.promptTemplateVersion}
                   </p>
                 </div>
                 <div className="inline-actions">
                   <button type="button" className="secondary-button" onClick={() => onTopicEdit(topic)}>
-                    Edit
+                    수정
                   </button>
                   {selectedTopicId === topic.id ? (
-                    <span className="status-pill">Selected</span>
+                    <span className="status-pill">선택됨</span>
                   ) : (
                     <button type="button" className="secondary-button" onClick={() => onSelectTopic(topic.id)}>
-                      Select
+                      선택
                     </button>
                   )}
                 </div>
@@ -211,14 +219,14 @@ export function AutomationControlCenter({
           </ul>
         </article>
 
-        <article className="admin-card stack" aria-label="Automation sources panel">
-          <h3>Sources</h3>
+        <article className="admin-card stack" aria-label="자동화 소스 패널">
+          <h3>소스</h3>
           <p className="muted">
-            {selectedTopic ? `Selected topic: ${selectedTopic.name}` : "Select a topic before editing source coverage."}
+            {selectedTopic ? `선택한 주제: ${selectedTopic.name}` : "소스를 편집하려면 먼저 주제를 선택하세요."}
           </p>
           <form className="stack" onSubmit={onSourceSubmit}>
             <label className="field">
-              <span>Source type</span>
+              <span>소스 유형</span>
               <select
                 name="sourceType"
                 defaultValue={sourceForm.sourceType}
@@ -230,7 +238,7 @@ export function AutomationControlCenter({
               </select>
             </label>
             <label className="field">
-              <span>Source URL</span>
+              <span>소스 URL</span>
               <input
                 name="sourceUrl"
                 type="url"
@@ -249,15 +257,15 @@ export function AutomationControlCenter({
                 key={`source-enabled-${sourceForm.editingId ?? "new"}-${sourceForm.enabled}`}
                 disabled={!selectedTopicId}
               />
-              <span>Enabled for collection</span>
+              <span>수집 대상으로 사용</span>
             </label>
             <div className="inline-actions">
               <button type="submit" disabled={!selectedTopicId || sourceForm.saving}>
-                {sourceForm.saving ? "Saving..." : sourceForm.editingId ? "Update source" : "Add source"}
+                {sourceForm.saving ? "저장 중..." : sourceForm.editingId ? "소스 수정" : "소스 추가"}
               </button>
               {sourceForm.editingId ? (
                 <button type="button" className="secondary-button" onClick={onSourceReset}>
-                  Clear editing state
+                  편집 취소
                 </button>
               ) : null}
             </div>
@@ -268,33 +276,33 @@ export function AutomationControlCenter({
                 <div>
                   <strong>{source.sourceType}</strong>
                   <p className="muted">
-                    {source.sourceUrl} - {source.enabled ? "enabled" : "disabled"}
+                    {source.sourceUrl} · {source.enabled ? "활성" : "비활성"}
                   </p>
                 </div>
                 <div className="inline-actions">
                   <button type="button" className="secondary-button" onClick={() => onSourceEdit(source)}>
-                    Edit
+                    수정
                   </button>
                   <button type="button" className="danger-button" onClick={() => onSourceDelete(source.id)}>
-                    Delete
+                    삭제
                   </button>
                 </div>
               </li>
             ))}
-            {sources.length === 0 ? <li className="muted">No sources for this topic.</li> : null}
+            {sources.length === 0 ? <li className="muted">이 주제에 연결된 소스가 없습니다.</li> : null}
           </ul>
         </article>
 
-        <article className="admin-card stack" aria-label="Automation schedules panel">
-          <h3>Schedules</h3>
-          <p className="muted">Use cron plus an IANA timezone. Once a schedule has history, disable it instead of deleting it.</p>
+        <article className="admin-card stack" aria-label="자동화 스케줄 패널">
+          <h3>스케줄</h3>
+          <p className="muted">Cron 표현식과 IANA 시간대를 사용합니다. 실행 이력이 생기면 삭제 대신 비활성화를 권장합니다.</p>
           <form className="stack" onSubmit={onScheduleSubmit}>
             <label className="field">
-              <span>Name</span>
+              <span>스케줄명</span>
               <input name="name" defaultValue={scheduleForm.name} key={`schedule-name-${scheduleForm.editingId ?? "new"}-${scheduleForm.name}`} required disabled={!selectedTopicId} />
             </label>
             <label className="field">
-              <span>Cron expression</span>
+              <span>Cron 표현식</span>
               <input
                 name="cronExpression"
                 defaultValue={scheduleForm.cronExpression}
@@ -305,7 +313,7 @@ export function AutomationControlCenter({
               />
             </label>
             <label className="field">
-              <span>Timezone</span>
+              <span>시간대</span>
               <input
                 name="timezone"
                 defaultValue={scheduleForm.timezone}
@@ -316,7 +324,7 @@ export function AutomationControlCenter({
               />
             </label>
             <label className="field">
-              <span>Status</span>
+              <span>상태</span>
               <select
                 name="status"
                 defaultValue={scheduleForm.status}
@@ -329,7 +337,7 @@ export function AutomationControlCenter({
               </select>
             </label>
             <label className="field">
-              <span>Misfire policy</span>
+              <span>미스파이어 정책</span>
               <select
                 name="misfirePolicy"
                 defaultValue={scheduleForm.misfirePolicy}
@@ -342,11 +350,11 @@ export function AutomationControlCenter({
             </label>
             <div className="inline-actions">
               <button type="submit" disabled={!selectedTopicId || scheduleForm.saving}>
-                {scheduleForm.saving ? "Saving..." : scheduleForm.editingId ? "Update schedule" : "Add schedule"}
+                {scheduleForm.saving ? "저장 중..." : scheduleForm.editingId ? "스케줄 수정" : "스케줄 추가"}
               </button>
               {scheduleForm.editingId ? (
                 <button type="button" className="secondary-button" onClick={onScheduleReset}>
-                  Clear editing state
+                  편집 취소
                 </button>
               ) : null}
             </div>
@@ -357,41 +365,41 @@ export function AutomationControlCenter({
                 <div>
                   <strong>{schedule.name}</strong>
                   <p className="muted">
-                    {schedule.cronExpression} - {schedule.timezone} - {schedule.status} - next {formatDateTime(schedule.nextPlannedRunAt)}
+                    {schedule.cronExpression} · {schedule.timezone} · {schedule.status} · 다음 실행 {formatDateTime(schedule.nextPlannedRunAt)}
                   </p>
                   <p className={`muted ${schedule.syncStatus === "OUT_OF_SYNC" ? "error-text" : ""}`}>
                     {schedule.syncStatus === "OUT_OF_SYNC"
-                      ? schedule.syncErrorMessage ?? "Quartz synchronization is currently out of sync."
-                      : `Quartz synchronized at ${formatDateTime(schedule.lastSynchronizedAt)}`}
+                      ? schedule.syncErrorMessage ?? "Quartz 동기화가 어긋난 상태입니다."
+                      : `Quartz 동기화 시각 ${formatDateTime(schedule.lastSynchronizedAt)}`}
                   </p>
                 </div>
                 <div className="inline-actions">
                   <button type="button" className="secondary-button" onClick={() => onScheduleEdit(schedule)}>
-                    Edit
+                    수정
                   </button>
                   <button type="button" className="danger-button" onClick={() => onScheduleDelete(schedule.id)}>
-                    Delete
+                    삭제
                   </button>
                 </div>
               </li>
             ))}
-            {schedules.length === 0 ? <li className="muted">No schedules for this topic.</li> : null}
+            {schedules.length === 0 ? <li className="muted">이 주제에 연결된 스케줄이 없습니다.</li> : null}
           </ul>
         </article>
       </div>
 
       <div className="admin-grid admin-grid-wide">
         <article className="admin-card stack">
-          <h3>Recent runs</h3>
+          <h3>최근 실행 이력</h3>
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Run</th>
-                <th>Status</th>
-                <th>Trigger</th>
-                <th>Snapshots</th>
-                <th>Completed</th>
-                <th>Action</th>
+                <th>실행 키</th>
+                <th>상태</th>
+                <th>트리거</th>
+                <th>스냅샷</th>
+                <th>완료 시각</th>
+                <th>동작</th>
               </tr>
             </thead>
             <tbody>
@@ -406,7 +414,7 @@ export function AutomationControlCenter({
                   <td>{formatDateTime(run.completedAt)}</td>
                   <td>
                     <button type="button" className="secondary-button" onClick={() => onSelectRun(run.id)}>
-                      Inspect
+                      상세보기
                     </button>
                   </td>
                 </tr>
@@ -416,26 +424,46 @@ export function AutomationControlCenter({
         </article>
 
         <article className="admin-card stack">
-          <h3>Selected run detail</h3>
+          <h3>선택한 실행 상세</h3>
           {runDetail ? (
             <>
               <p className="muted">
                 {runDetail.run.status}
-                {runDetail.run.holdReason ? ` - ${runDetail.run.holdReason}` : ""}
+                {runDetail.run.holdReason ? ` · ${runDetail.run.holdReason}` : ""}
+                {runDetail.run.resolutionStatus ? ` · 처리 상태 ${runDetail.run.resolutionStatus}` : ""}
               </p>
+              <div className="inline-actions">
+                <button type="button" className="secondary-button" disabled={!runDetail.availableActions.canRetry || actionPending !== null} onClick={() => onRetryRun(runDetail.run.id)}>
+                  {actionPending === "retry" ? "재시도 중..." : "재시도"}
+                </button>
+                <button type="button" className="secondary-button" disabled={!runDetail.availableActions.canCancel || actionPending !== null} onClick={() => onCancelRun(runDetail.run.id)}>
+                  {actionPending === "cancel" ? "취소 중..." : "실행 취소"}
+                </button>
+                <button type="button" disabled={!runDetail.availableActions.canOverridePublish || actionPending !== null} onClick={() => onOverridePublish(runDetail.run.id)}>
+                  {actionPending === "override" ? "발행 중..." : "수동 발행"}
+                </button>
+              </div>
+              {runDetail.generatedDraft ? (
+                <article className="admin-card stack">
+                  <h4>저장된 생성 초안</h4>
+                  <p><strong>{runDetail.generatedDraft.title}</strong></p>
+                  <p className="muted">{runDetail.generatedDraft.excerpt}</p>
+                  <pre className="code-block">{runDetail.generatedDraft.contentMarkdown}</pre>
+                </article>
+              ) : null}
               <ul className="admin-list">
                 {runDetail.snapshots.map((snapshot) => (
                   <li key={snapshot.id}>
                     <strong>{snapshot.title}</strong>
                     <span className="muted">
-                      {snapshot.originHost} - {snapshot.policyResult} - {snapshot.canonicalUrl}
+                      {snapshot.originHost} · {snapshot.policyResult} · {snapshot.canonicalUrl}
                     </span>
                   </li>
                 ))}
               </ul>
             </>
           ) : (
-            <p className="muted">Select a run to inspect collected sources and hold reasons.</p>
+            <p className="muted">실행을 선택하면 수집한 소스, 보류 사유, 사용 가능한 후속 조치를 볼 수 있습니다.</p>
           )}
         </article>
       </div>
@@ -444,33 +472,33 @@ export function AutomationControlCenter({
         <article className="admin-card stack">
           <div className="inline-actions">
             <h3>Operational diagnostics</h3>
-            <span className="muted">Generated {formatDateTime(diagnostics.generatedAt)}</span>
+            <span className="muted">생성 시각 {formatDateTime(diagnostics.generatedAt)}</span>
           </div>
           <ul className="admin-list">
             <li>
-              <strong>Held source snapshots</strong>
+              <strong>보류된 소스 스냅샷</strong>
               <span className="muted">{diagnostics.heldSnapshotCount}</span>
             </li>
             <li>
-              <strong>Jobs submitted</strong>
+              <strong>제출된 작업</strong>
               <span className="muted">{diagnostics.jobCounts.submitted}</span>
             </li>
             <li>
-              <strong>Jobs failed</strong>
+              <strong>실패한 작업</strong>
               <span className="muted">{diagnostics.jobCounts.failed}</span>
             </li>
             <li>
-              <strong>Outbox delivered</strong>
+              <strong>전달 완료 아웃박스</strong>
               <span className="muted">{diagnostics.outboxCounts.delivered}</span>
             </li>
           </ul>
           <div>
-            <h4>Recent hold reasons</h4>
+            <h4>최근 보류 사유</h4>
             <ul className="admin-list">
               {diagnostics.recentHoldReasons.length > 0 ? (
                 diagnostics.recentHoldReasons.map((reason, index) => <li key={`${reason}-${index}`}>{reason}</li>)
               ) : (
-                <li className="muted">No recent hold reasons.</li>
+                <li className="muted">최근 보류 사유가 없습니다.</li>
               )}
             </ul>
           </div>
@@ -479,20 +507,20 @@ export function AutomationControlCenter({
 
       <article className="admin-card stack">
         <div className="inline-actions">
-          <h3>Publication recovery outbox</h3>
+          <h3>발행 복구 아웃박스</h3>
           <button type="button" onClick={onProcessOutbox} disabled={processingOutbox}>
-            {processingOutbox ? "Processing..." : "Replay pending events"}
+            {processingOutbox ? "처리 중..." : "대기 이벤트 재처리"}
           </button>
         </div>
         <table className="admin-table">
           <thead>
             <tr>
               <th>ID</th>
-              <th>Post</th>
-              <th>Status</th>
-              <th>Available</th>
-              <th>Last attempt</th>
-              <th>Processed</th>
+              <th>게시글</th>
+              <th>상태</th>
+              <th>처리 가능 시각</th>
+              <th>마지막 시도</th>
+              <th>처리 완료</th>
             </tr>
           </thead>
           <tbody>

@@ -122,10 +122,14 @@ export type AutomationRunResponse = {
   runKey: string;
   topicId: number;
   scheduleId: number | null;
+  retryOfRunId: number | null;
   triggerType: string;
   status: string;
   idempotencyKey: string;
   holdReason: string | null;
+  resolutionStatus: string | null;
+  resolutionNote: string | null;
+  resolvedPostId: number | null;
   snapshotCount: number;
   startedAt: string;
   completedAt: string | null;
@@ -135,6 +139,17 @@ export type AutomationRunResponse = {
 
 export type AutomationRunDetailResponse = {
   run: AutomationRunResponse;
+  generatedDraft: {
+    title: string;
+    excerpt: string;
+    contentMarkdown: string;
+    citationSnapshotIds: number[];
+  } | null;
+  availableActions: {
+    canRetry: boolean;
+    canCancel: boolean;
+    canOverridePublish: boolean;
+  };
   snapshots: {
     id: number;
     sourceUrl: string;
@@ -146,6 +161,12 @@ export type AutomationRunDetailResponse = {
     contentHash: string;
     retrievedAt: string;
   }[];
+};
+
+export type AutomationRunOverridePublishResponse = {
+  runId: number;
+  postId: number;
+  slug: string;
 };
 
 export type AutomationOutboxResponse = {

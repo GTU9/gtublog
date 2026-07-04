@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -18,6 +19,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class AutomationAdminService {
@@ -32,11 +34,14 @@ public class AutomationAdminService {
     private final SourceCollectionService sourceCollectionService;
     private final AutomationScheduleSynchronizer automationScheduleSynchronizer;
     private final GenerationJobService generationJobService;
+    private final GenerationJobRepository generationJobRepository;
     private final PublicationOutboxService publicationOutboxService;
     private final SourceUrlPolicy sourceUrlPolicy;
     private final AutomationRunLifecycleService automationRunLifecycleService;
     private final AutomationRunRecoveryService automationRunRecoveryService;
     private final AutomationRunRecoveryTransaction automationRunRecoveryTransaction;
+    private final AutomationPublicationService automationPublicationService;
+    private final ObjectMapper objectMapper;
 
     public AutomationAdminService(
             AutomationTopicRepository automationTopicRepository,
@@ -49,11 +54,14 @@ public class AutomationAdminService {
             SourceCollectionService sourceCollectionService,
             AutomationScheduleSynchronizer automationScheduleSynchronizer,
             GenerationJobService generationJobService,
+            GenerationJobRepository generationJobRepository,
             PublicationOutboxService publicationOutboxService,
             SourceUrlPolicy sourceUrlPolicy,
             AutomationRunLifecycleService automationRunLifecycleService,
             AutomationRunRecoveryService automationRunRecoveryService,
-            AutomationRunRecoveryTransaction automationRunRecoveryTransaction) {
+            AutomationRunRecoveryTransaction automationRunRecoveryTransaction,
+            AutomationPublicationService automationPublicationService,
+            ObjectMapper objectMapper) {
         this.automationTopicRepository = automationTopicRepository;
         this.automationSourceRepository = automationSourceRepository;
         this.automationScheduleRepository = automationScheduleRepository;
@@ -64,11 +72,14 @@ public class AutomationAdminService {
         this.sourceCollectionService = sourceCollectionService;
         this.automationScheduleSynchronizer = automationScheduleSynchronizer;
         this.generationJobService = generationJobService;
+        this.generationJobRepository = generationJobRepository;
         this.publicationOutboxService = publicationOutboxService;
         this.sourceUrlPolicy = sourceUrlPolicy;
         this.automationRunLifecycleService = automationRunLifecycleService;
         this.automationRunRecoveryService = automationRunRecoveryService;
         this.automationRunRecoveryTransaction = automationRunRecoveryTransaction;
+        this.automationPublicationService = automationPublicationService;
+        this.objectMapper = objectMapper;
     }
 
     @Transactional(readOnly = true)
@@ -208,12 +219,73 @@ public class AutomationAdminService {
                         snapshot.getContentHash(),
                         snapshot.getRetrievedAt()))
                 .toList();
-        return new AutomationRunDetailResponse(toRunResponse(run), snapshots);
+        var generatedDraft = generatedDraft(runId);
+        return new AutomationRunDetailResponse(
+                toRunResponse(run),
+                snapshots,
+                generatedDraft,
+                new AutomationRunDetailResponse.AvailableActionsResponse(
+                        canRetry(run),
+                        canCancel(run),
+                        canOverridePublish(run, generatedDraft)));
     }
 
     @Transactional
     public AutomationRunRecoveryResponse recoverRun(Long runId) {
         return new AutomationRunRecoveryResponse(runId, automationRunRecoveryTransaction.recover(runId, automationRunRepository.currentDatabaseUtc()));
+    }
+
+    @Transactional
+    public AutomationRunResponse retryHeldRun(Long runId) {
+        var run = automationRunRepository.findByIdForUpdate(runId).orElseThrow(() -> new NoSuchElementException("Automation run not found."));
+        if (!canRetry(run)) {
+            throw new IllegalStateException("Only unresolved held automation runs can be retried.");
+        }
+        var retried = createOrReuseRun(run.getTopicId(), null, runId, "RETRY", "retry:%d:%s".formatted(runId, UUID.randomUUID()));
+        run.markRetried(retried.run().getId());
+        auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, runId.toString(), "AUTOMATION_RUN_RETRIED", Map.of("retryRunId", retried.run().getId()));
+        var enabledSources = automationSourceRepository.findAllByTopicIdAndEnabledTrueOrderByIdAsc(run.getTopicId());
+        if (enabledSources.isEmpty()) {
+            automationRunLifecycleService.hold(retried.run().getId(), AutomationHoldReason.NO_ENABLED_SOURCES);
+            return runDetail(retried.run().getId()).run();
+        }
+        var result = sourceCollectionService.collect(run.getTopicId(), retried.run().getId(), enabledSources);
+        if (result.holdReason() == null) {
+            var topic = automationTopicRepository.findById(run.getTopicId()).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
+            generationJobService.enqueueForRun(topic, retried.run(), result.snapshots());
+        } else {
+            automationRunLifecycleService.hold(retried.run().getId(), result.holdReason());
+        }
+        return runDetail(retried.run().getId()).run();
+    }
+
+    @Transactional
+    public AutomationRunResponse cancelRun(Long runId) {
+        var run = automationRunRepository.findByIdForUpdate(runId).orElseThrow(() -> new NoSuchElementException("Automation run not found."));
+        if (!canCancel(run)) {
+            throw new IllegalStateException("Only active automation runs can be cancelled.");
+        }
+        generationJobRepository.findByRunIdForUpdate(runId)
+                .ifPresent(job -> job.cancelForExpiredRun(AutomationHoldReason.ADMINISTRATOR_CANCELLED, automationRunRepository.currentDatabaseUtc()));
+        var now = automationRunRepository.currentDatabaseUtc();
+        run.markFailed(AutomationHoldReason.ADMINISTRATOR_CANCELLED, now);
+        run.markCancelledByAdmin();
+        auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, runId.toString(), "AUTOMATION_RUN_CANCELLED", Map.of());
+        return toRunResponse(run);
+    }
+
+    @Transactional
+    public AutomationRunOverridePublishResponse overridePublishHeldRun(Long runId) {
+        var run = automationRunRepository.findByIdForUpdate(runId).orElseThrow(() -> new NoSuchElementException("Automation run not found."));
+        var draft = generatedDraft(runId);
+        if (!canOverridePublish(run, draft)) {
+            throw new IllegalStateException("Only approved held automation runs with a stored draft can be published manually.");
+        }
+        var job = generationJobRepository.findByRunIdForUpdate(runId)
+                .orElseThrow(() -> new NoSuchElementException("Generation job not found for the held automation run."));
+        var response = automationPublicationService.publishAdminOverride(job, run, draft);
+        run.markOverridePublished(response.postId());
+        return response;
     }
 
     @Transactional(readOnly = true)
@@ -258,7 +330,7 @@ public class AutomationAdminService {
 
     public AutomationRunResponse triggerManualRun(Long topicId, String idempotencyKey) {
         requireTopic(topicId);
-        return executeRun(topicId, null, "MANUAL", idempotencyKey);
+        return executeRun(topicId, null, null, "MANUAL", idempotencyKey);
     }
 
     public AutomationRunResponse triggerScheduledRun(Long scheduleId, String idempotencyKey, Instant fireTime) {
@@ -266,21 +338,21 @@ public class AutomationAdminService {
         String resolvedKey = idempotencyKey == null || idempotencyKey.isBlank()
                 ? "schedule:%d:%s".formatted(scheduleId, fireTime == null ? Instant.now().toString() : fireTime.toString())
                 : idempotencyKey;
-        return executeRun(schedule.getTopicId(), scheduleId, "SCHEDULED", resolvedKey);
+        return executeRun(schedule.getTopicId(), scheduleId, null, "SCHEDULED", resolvedKey);
     }
 
-    private AutomationRunResponse executeRun(Long topicId, Long scheduleId, String triggerType, String providedIdempotencyKey) {
+    private AutomationRunResponse executeRun(Long topicId, Long scheduleId, Long retryOfRunId, String triggerType, String providedIdempotencyKey) {
         String idempotencyKey = providedIdempotencyKey == null || providedIdempotencyKey.isBlank()
                 ? triggerType.toLowerCase() + ":" + topicId + ":" + UUID.randomUUID()
                 : providedIdempotencyKey;
-        var creation = createOrReuseRun(topicId, scheduleId, triggerType, idempotencyKey);
+        var creation = createOrReuseRun(topicId, scheduleId, retryOfRunId, triggerType, idempotencyKey);
         if (!creation.createdNew()) {
             return toRunResponse(creation.run());
         }
 
         var enabledSources = automationSourceRepository.findAllByTopicIdAndEnabledTrueOrderByIdAsc(topicId);
         if (enabledSources.isEmpty()) {
-            automationRunLifecycleService.hold(creation.run().getId(), "No enabled automation sources are configured for this topic.");
+            automationRunLifecycleService.hold(creation.run().getId(), AutomationHoldReason.NO_ENABLED_SOURCES);
             return runDetail(creation.run().getId()).run();
         }
 
@@ -297,14 +369,63 @@ public class AutomationAdminService {
     private AutomationRunLifecycleService.StartResult createOrReuseRun(
             Long topicId,
             Long scheduleId,
+            Long retryOfRunId,
             String triggerType,
             String idempotencyKey) {
         try {
-            return automationRunLifecycleService.start(topicId, scheduleId, triggerType, idempotencyKey);
+            return automationRunLifecycleService.start(topicId, scheduleId, retryOfRunId, triggerType, idempotencyKey);
         } catch (DataIntegrityViolationException exception) {
             var duplicate = automationRunRepository.findByIdempotencyKey(idempotencyKey).orElseThrow();
             return new AutomationRunLifecycleService.StartResult(duplicate, false);
         }
+    }
+
+    private AutomationRunDetailResponse.GeneratedDraftResponse generatedDraft(Long runId) {
+        return generationJobRepository.findByRunId(runId)
+                .filter(job -> job.getResultPayloadJson() != null && !job.getResultPayloadJson().isBlank())
+                .map(job -> {
+                    try {
+                        var payload = objectMapper.readTree(job.getResultPayloadJson());
+                        List<Long> citationIds = new ArrayList<>();
+                        for (var citationNode : payload.withArray("citationSnapshotIds")) {
+                            if (citationNode == null || citationNode.isNull()) {
+                                continue;
+                            }
+                            if (citationNode.canConvertToLong()) {
+                                citationIds.add(citationNode.longValue());
+                                continue;
+                            }
+                            var text = citationNode.asText();
+                            if (text != null && !text.isBlank()) {
+                                citationIds.add(Long.parseLong(text));
+                            }
+                        }
+                        return new AutomationRunDetailResponse.GeneratedDraftResponse(
+                                payload.path("title").asText(),
+                                payload.path("excerpt").asText(),
+                                payload.path("contentMarkdown").asText(),
+                                citationIds);
+                    } catch (Exception exception) {
+                        throw new IllegalStateException("Could not deserialize the stored automation draft.", exception);
+                    }
+                })
+                .orElse(null);
+    }
+
+    private boolean canRetry(AutomationRun run) {
+        return run.getStatus() == AutomationRunStatus.HELD && run.getResolutionStatus() == null;
+    }
+
+    private boolean canCancel(AutomationRun run) {
+        return run.getStatus() == AutomationRunStatus.RUNNING;
+    }
+
+    private boolean canOverridePublish(AutomationRun run, AutomationRunDetailResponse.GeneratedDraftResponse draft) {
+        if (run.getStatus() != AutomationRunStatus.HELD || run.getResolutionStatus() != null || draft == null) {
+            return false;
+        }
+        return AutomationHoldReason.AUTOMATIC_PUBLICATION_DISABLED.equals(run.getHoldReason())
+                || AutomationHoldReason.INSUFFICIENT_ORIGINS.equals(run.getHoldReason());
     }
 
     private String uniqueTopicSlug(String providedSlug, String fallbackName, Long currentId) {
@@ -429,10 +550,14 @@ public class AutomationAdminService {
                 run.getRunKey(),
                 run.getTopicId(),
                 run.getScheduleId(),
+                run.getRetryOfRunId(),
                 run.getTriggerType(),
                 run.getStatus(),
                 run.getIdempotencyKey(),
                 run.getHoldReason(),
+                run.getResolutionStatus(),
+                run.getResolutionNote(),
+                run.getResolvedPostId(),
                 sourceSnapshotRepository.countByAutomationRunId(run.getId()),
                 run.getStartedAt(),
                 run.getCompletedAt(),
