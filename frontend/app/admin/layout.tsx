@@ -22,7 +22,7 @@ function AdminShell({ children }: { children: React.ReactNode }) {
   }
 
   if (auth.status !== "authenticated") {
-    return <main className="admin-panel">Loading administrator session...</main>;
+    return <main className="admin-panel">관리자 세션을 불러오는 중입니다...</main>;
   }
 
   return (
@@ -30,18 +30,18 @@ function AdminShell({ children }: { children: React.ReactNode }) {
       <aside className="admin-sidebar">
         <div>
           <p className="eyebrow">ADMIN</p>
-          <h1>{auth.admin?.displayName ?? "Administrator"}</h1>
+          <h1>{auth.admin?.displayName ?? "관리자"}</h1>
           <p className="muted">{auth.admin?.username}</p>
         </div>
-        <nav className="admin-nav" aria-label="Administrator navigation">
-          <Link href="/admin">Dashboard</Link>
-          <Link href="/admin/automation">Automation</Link>
-          <Link href="/admin/posts">Posts</Link>
-          <Link href="/admin/taxonomy">Taxonomy</Link>
-          <Link href="/admin/audit">Audit</Link>
+        <nav className="admin-nav" aria-label="관리자 탐색">
+          <Link href="/admin">대시보드</Link>
+          <Link href="/admin/automation">자동화 운영</Link>
+          <Link href="/admin/posts">글 관리</Link>
+          <Link href="/admin/taxonomy">분류 관리</Link>
+          <Link href="/admin/audit">감사 로그</Link>
         </nav>
         <button type="button" className="secondary-button" onClick={() => void auth.logout()}>
-          Sign out
+          로그아웃
         </button>
       </aside>
       <main className="admin-panel">{children}</main>

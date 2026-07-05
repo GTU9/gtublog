@@ -334,7 +334,7 @@ export default function AdminAutomationPage() {
       const nextTopicId = await refreshTopics(saved.id);
       await refreshTopicDetails(nextTopicId);
       resetTopicForm();
-      setMessage(topicForm.editingId ? "Automation topic updated." : "Automation topic created.");
+      setMessage(topicForm.editingId ? "자동화 주제를 수정했습니다." : "자동화 주제를 생성했습니다.");
     } catch (error) {
       setError(error instanceof Error ? error.message : "자동화 주제를 저장하지 못했습니다.");
       setTopicForm((current) => ({ ...current, saving: false }));
@@ -432,7 +432,7 @@ export default function AdminAutomationPage() {
   return (
     <section className="stack">
       <AdminPageHeader
-        title="Automation"
+        title="자동화 운영"
         description="수집 실행 상태를 추적하고, 보류 사유를 검토하고, 복구 이벤트를 다시 처리하는 관리자 화면입니다."
       />
       {error ? <MessageCard title="자동화 화면 오류" description={error} tone="error" /> : null}

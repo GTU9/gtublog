@@ -48,7 +48,7 @@ export default function AdminCreatePostPage() {
       const detail = await createAdminPost(auth.authenticatedFetch, request);
       router.replace(`/admin/posts/${detail.id}`);
     } catch {
-      setMessage("Unable to create the draft right now.");
+      setMessage("지금은 새 초안을 생성할 수 없습니다.");
     } finally {
       setSaving(false);
     }
@@ -57,10 +57,10 @@ export default function AdminCreatePostPage() {
   return (
     <section className="stack">
       <AdminPageHeader
-        title="New draft"
-        description="Create a new manual draft with taxonomy assignment and immediate preview."
+        title="새 글 작성"
+        description="수동 초안을 만들고 분류를 연결한 뒤 즉시 미리보기까지 확인합니다."
       />
-      {message ? <MessageCard title="Draft creation failed" description={message} tone="error" /> : null}
+      {message ? <MessageCard title="초안 생성에 실패했습니다" description={message} tone="error" /> : null}
       <div
         onInput={(event) => {
           const target = event.target as HTMLTextAreaElement | null;
@@ -77,7 +77,7 @@ export default function AdminCreatePostPage() {
           mode="create"
           saving={saving}
           previewHtml={previewHtmlFromMarkdown(markdownPreview)}
-          message="Drafts are created in DRAFT state and can be published from the editor."
+          message="새 글은 초안 상태로 저장되며, 상세 편집기에서 발행할 수 있습니다."
           onSubmit={handleSubmit}
           onAction={() => undefined}
           onRestoreRevision={() => undefined}

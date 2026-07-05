@@ -116,8 +116,8 @@ describe("admin mock state", () => {
     expect(source.topicId).toBe(topic.id);
     expect(schedule.syncStatus).toBe("SYNCED");
 
-    expect(() => mockDeleteAutomationSource(101)).toThrow(/Disable it instead of deleting it/);
-    expect(() => mockDeleteAutomationSchedule(201)).toThrow(/Disable it instead of deleting it/);
+    expect(() => mockDeleteAutomationSource(101)).toThrow(/삭제 대신 비활성화하세요/);
+    expect(() => mockDeleteAutomationSchedule(201)).toThrow(/삭제 대신 비활성화하세요/);
   });
 
   it("updates automation topics, sources, and schedules while preserving safety metadata", () => {
@@ -178,6 +178,6 @@ describe("admin mock state", () => {
 
     expect(cancelled.status).toBe("FAILED");
     expect(cancelled.resolutionStatus).toBe("CANCELLED");
-    expect(cancelled.holdReason).toMatch(/administrator/i);
+    expect(cancelled.holdReason).toMatch(/관리자/);
   });
 });

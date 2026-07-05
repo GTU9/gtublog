@@ -28,7 +28,7 @@ function LoginForm() {
       await auth.login(username, password);
       router.replace("/admin");
     } catch {
-      setError("Unable to sign in with the provided credentials.");
+      setError("입력한 관리자 계정으로 로그인할 수 없습니다.");
     } finally {
       setSubmitting(false);
     }
@@ -38,19 +38,19 @@ function LoginForm() {
     <main className="admin-login-page">
       <form className="admin-card" onSubmit={handleSubmit}>
         <p className="eyebrow">ADMIN ACCESS</p>
-        <h1>Sign in</h1>
-        <p className="muted">Use the configured administrator account to manage posts and taxonomy.</p>
+        <h1>관리자 로그인</h1>
+        <p className="muted">설정된 관리자 계정으로 글, 분류, 자동화 운영을 관리합니다.</p>
         <label className="field">
-          <span>Username</span>
+          <span>아이디</span>
           <input value={username} onChange={(event) => setUsername(event.target.value)} />
         </label>
         <label className="field">
-          <span>Password</span>
+          <span>비밀번호</span>
           <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} />
         </label>
         {error ? <p className="error-text">{error}</p> : null}
         <button type="submit" disabled={submitting}>
-          {submitting ? "Signing in..." : "Sign in"}
+          {submitting ? "로그인 중..." : "로그인"}
         </button>
       </form>
     </main>

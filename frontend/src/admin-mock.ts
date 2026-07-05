@@ -516,13 +516,13 @@ export function mockSaveAutomationSource(
 export function mockDeleteAutomationSource(sourceId: number) {
   const source = automationSourcesStore.find((item) => item.id === sourceId);
   if (!source) {
-    throw new Error("Automation source not found.");
+    throw new Error("자동화 소스를 찾을 수 없습니다.");
   }
   const isReferenced = Array.from(automationRunDetailsStore.values()).some((detail) =>
     detail.snapshots.some((snapshot) => snapshot.sourceUrl === source.sourceUrl),
   );
   if (isReferenced) {
-    throw new Error("This source is already referenced by collected evidence. Disable it instead of deleting it.");
+    throw new Error("이 소스는 이미 수집 증거에 연결되어 있습니다. 삭제 대신 비활성화하세요.");
   }
   automationSourcesStore = automationSourcesStore.filter((item) => item.id !== sourceId);
   recordAudit("AUTOMATION", String(sourceId), "AUTOMATION_SOURCE_DELETED", {});
@@ -570,11 +570,11 @@ export function mockSaveAutomationSchedule(
 export function mockDeleteAutomationSchedule(scheduleId: number) {
   const schedule = automationSchedulesStore.find((item) => item.id === scheduleId);
   if (!schedule) {
-    throw new Error("Automation schedule not found.");
+    throw new Error("자동화 스케줄을 찾을 수 없습니다.");
   }
   const hasHistory = automationRunsStore.some((item) => item.scheduleId === scheduleId);
   if (hasHistory) {
-    throw new Error("This schedule already has run history. Disable it instead of deleting it.");
+    throw new Error("이 스케줄에는 이미 실행 이력이 있습니다. 삭제 대신 비활성화하세요.");
   }
   automationSchedulesStore = automationSchedulesStore.filter((item) => item.id !== scheduleId);
   recordAudit("AUTOMATION", String(scheduleId), "AUTOMATION_SCHEDULE_DELETED", {});
@@ -697,16 +697,16 @@ export function mockAutomationRunCancel(runId: number) {
   const run = automationRunsStore.find((item) => item.id === runId);
   const detail = automationRunDetailsStore.get(runId);
   if (!run || !detail || run.status !== "RUNNING") {
-    throw new Error("Only active automation runs can be cancelled.");
+    throw new Error("현재 진행 중인 자동화 실행만 취소할 수 있습니다.");
   }
 
   const now = new Date().toISOString();
   const cancelledRun: AutomationRunResponse = {
     ...run,
     status: "FAILED",
-    holdReason: "Cancelled by the administrator.",
+    holdReason: "관리자가 실행을 취소했습니다.",
     resolutionStatus: "CANCELLED",
-    resolutionNote: "Cancelled by the administrator.",
+    resolutionNote: "관리자가 실행을 취소했습니다.",
     completedAt: now,
     updatedAt: now,
   };
@@ -729,7 +729,7 @@ export function mockAutomationRunOverridePublish(runId: number): AutomationRunOv
   const run = automationRunsStore.find((item) => item.id === runId);
   const detail = automationRunDetailsStore.get(runId);
   if (!run || !detail || !detail.availableActions.canOverridePublish || !detail.generatedDraft) {
-    throw new Error("Only approved held automation runs with a stored draft can be published manually.");
+    throw new Error("저장된 초안이 있고 수동 발행이 허용된 보류 실행만 발행할 수 있습니다.");
   }
 
   const now = new Date().toISOString();

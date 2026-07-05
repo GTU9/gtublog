@@ -59,7 +59,7 @@ export default function AdminPostDetailPage() {
         setPreviewHtml(loadedDetail?.contentHtml ?? "");
       } catch {
         if (active) {
-          setError("Unable to load the selected post.");
+          setError("선택한 글을 불러올 수 없습니다.");
         }
       }
     })();
@@ -98,9 +98,9 @@ export default function AdminPostDetailPage() {
       setTags(loadedTags);
       setRevisions(loadedRevisions);
       setPreviewHtml(loadedDetail?.contentHtml ?? "");
-      setMessage("Post changes saved.");
+      setMessage("글 변경 사항을 저장했습니다.");
     } catch {
-      setError("Unable to save post changes.");
+      setError("글 변경 사항을 저장할 수 없습니다.");
     } finally {
       setSaving(false);
     }
@@ -119,9 +119,21 @@ export default function AdminPostDetailPage() {
       setTags(loadedTags);
       setRevisions(loadedRevisions);
       setPreviewHtml(loadedDetail?.contentHtml ?? "");
-      setMessage(`Post ${action} action completed.`);
+      const actionLabels: Record<typeof action, string> = {
+        publish: "발행",
+        archive: "보관",
+        delete: "삭제",
+        restore: "초안 복원",
+      };
+      setMessage(`${actionLabels[action]} 작업을 완료했습니다.`);
     } catch {
-      setError(`Unable to ${action} this post.`);
+      const actionLabels: Record<typeof action, string> = {
+        publish: "발행",
+        archive: "보관",
+        delete: "삭제",
+        restore: "초안 복원",
+      };
+      setError(`글 ${actionLabels[action]} 작업을 진행할 수 없습니다.`);
     }
   }
 
@@ -138,24 +150,24 @@ export default function AdminPostDetailPage() {
       setTags(loadedTags);
       setRevisions(loadedRevisions);
       setPreviewHtml(loadedDetail?.contentHtml ?? "");
-      setMessage(`Revision ${revisionNumber} restored.`);
+      setMessage(`${revisionNumber}번 리비전을 복원했습니다.`);
     } catch {
-      setError("Unable to restore the selected revision.");
+      setError("선택한 리비전을 복원할 수 없습니다.");
     }
   }
 
   if (Number.isNaN(postId)) {
-    return <MessageCard title="Invalid post" description="The selected post id is not valid." tone="error" />;
+    return <MessageCard title="잘못된 글입니다" description="선택한 글 ID가 올바르지 않습니다." tone="error" />;
   }
 
   return (
     <section className="stack">
       <AdminPageHeader
-        title={detail ? detail.title : "Post editor"}
-        description="Edit content, preview HTML, control publication state, and restore earlier revisions."
+        title={detail ? detail.title : "글 편집기"}
+        description="본문 편집, HTML 미리보기, 발행 상태 제어, 이전 리비전 복원을 한 화면에서 처리합니다."
       />
-      {message ? <MessageCard title="Editor update" description={message} tone="success" /> : null}
-      {error ? <MessageCard title="Editor unavailable" description={error} tone="error" /> : null}
+      {message ? <MessageCard title="편집 내용을 반영했습니다" description={message} tone="success" /> : null}
+      {error ? <MessageCard title="글 편집기를 사용할 수 없습니다" description={error} tone="error" /> : null}
       {detail ? (
         <div
           onInput={(event) => {
@@ -173,14 +185,14 @@ export default function AdminPostDetailPage() {
             mode="edit"
             saving={saving}
             previewHtml={previewHtml}
-            message="The editor keeps access tokens in memory only and refreshes through the centralized auth client."
+            message="관리자 인증은 메모리 기반 액세스 토큰과 중앙화된 갱신 흐름으로 유지됩니다."
             onSubmit={handleSubmit}
             onAction={(action) => void handleAction(action)}
             onRestoreRevision={(revisionNumber) => void handleRestoreRevision(revisionNumber)}
           />
         </div>
       ) : (
-        <LoadingCard message="Loading post editor..." />
+        <LoadingCard message="글 편집기를 불러오는 중입니다..." />
       )}
     </section>
   );

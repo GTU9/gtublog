@@ -17,16 +17,16 @@ export default function AdminAuditPage() {
       return;
     }
 
-    void fetchAuditEntries(auth.authenticatedFetch).then(setPage).catch(() => setError("Unable to load audit entries."));
+    void fetchAuditEntries(auth.authenticatedFetch).then(setPage).catch(() => setError("감사 로그를 불러올 수 없습니다."));
   }, [auth]);
 
   return (
     <section className="stack">
       <AdminPageHeader
-        title="Audit log"
-        description="Inspect recent authentication, taxonomy, and post mutations with recorded details."
+        title="감사 로그"
+        description="로그인, 분류 변경, 글 수정 이력을 세부 기록과 함께 확인합니다."
       />
-      {error ? <MessageCard title="Audit unavailable" description={error} tone="error" /> : null}
+      {error ? <MessageCard title="감사 로그를 불러올 수 없습니다" description={error} tone="error" /> : null}
       <AuditTable page={page} />
     </section>
   );

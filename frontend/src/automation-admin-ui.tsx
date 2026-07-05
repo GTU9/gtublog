@@ -24,6 +24,119 @@ function formatDateTime(value: string | null) {
   }).format(new Date(value));
 }
 
+function formatRunStatus(status: string) {
+  switch (status) {
+    case "PENDING":
+      return "대기";
+    case "RUNNING":
+      return "실행 중";
+    case "SUCCEEDED":
+      return "성공";
+    case "HELD":
+      return "보류";
+    case "FAILED":
+      return "실패";
+    default:
+      return status;
+  }
+}
+
+function formatTriggerType(triggerType: string) {
+  switch (triggerType) {
+    case "MANUAL":
+      return "수동 실행";
+    case "SCHEDULED":
+      return "예약 실행";
+    default:
+      return triggerType;
+  }
+}
+
+function formatResolutionStatus(status: string | null) {
+  switch (status) {
+    case null:
+      return null;
+    case "RETRIED":
+      return "재시도 처리됨";
+    case "CANCELLED":
+      return "관리자 취소";
+    case "OVERRIDE_PUBLISHED":
+      return "수동 발행 완료";
+    default:
+      return status;
+  }
+}
+
+function formatPolicyResult(policyResult: string) {
+  switch (policyResult) {
+    case "ALLOWED":
+      return "허용";
+    case "HELD":
+      return "보류";
+    case "REJECTED":
+      return "차단";
+    default:
+      return policyResult;
+  }
+}
+
+function formatScheduleStatus(status: string) {
+  switch (status) {
+    case "ACTIVE":
+      return "활성";
+    case "PAUSED":
+      return "일시 중지";
+    case "DISABLED":
+      return "비활성";
+    default:
+      return status;
+  }
+}
+
+function formatMisfirePolicy(policy: string) {
+  switch (policy) {
+    case "FIRE_ONCE_NOW":
+      return "놓친 실행 1회 즉시 보정";
+    case "DO_NOTHING":
+      return "놓친 실행 건너뜀";
+    default:
+      return policy;
+  }
+}
+
+function formatOutboxStatus(status: string) {
+  switch (status) {
+    case "PENDING":
+      return "대기";
+    case "DELIVERED":
+      return "전달 완료";
+    default:
+      return status;
+  }
+}
+
+function buildRunGuidance(runDetail: AutomationRunDetailResponse) {
+  if (runDetail.run.resolutionStatus === "OVERRIDE_PUBLISHED") {
+    return "보류 초안이 관리자 판단으로 수동 발행된 상태입니다. 이후 공개 글과 감사 로그를 함께 확인하세요.";
+  }
+  if (runDetail.run.resolutionStatus === "RETRIED") {
+    return "이 실행은 이미 재시도 요청을 보냈습니다. 새 실행 결과에서 보류 사유가 해소됐는지 확인하세요.";
+  }
+  if (runDetail.run.resolutionStatus === "CANCELLED") {
+    return "관리자가 실행을 중단한 상태입니다. 작업 중단 사유와 후속 재실행 필요 여부를 확인하세요.";
+  }
+  if (runDetail.run.status === "HELD") {
+    return "보류 상태입니다. 보류 사유를 먼저 읽고, 재시도와 수동 발행 중 어떤 조치가 맞는지 판단하세요.";
+  }
+  if (runDetail.run.status === "RUNNING") {
+    return "실행이 진행 중입니다. 아직 최종 발행 판단이 끝나지 않았으므로 필요 시에만 취소하세요.";
+  }
+  if (runDetail.run.status === "SUCCEEDED") {
+    return "정상 완료된 실행입니다. 발행 반영과 아웃박스 전달 상태까지 함께 확인하면 운영 추적이 쉬워집니다.";
+  }
+  return "실행 결과와 후속 조치를 함께 검토하세요.";
+}
+
 export function AutomationControlCenter({
   diagnostics,
   topics,
@@ -113,6 +226,8 @@ export function AutomationControlCenter({
   onProcessOutbox: () => void;
 }) {
   const selectedTopic = topics.find((topic) => topic.id === selectedTopicId) ?? null;
+  const uniqueOriginHosts = runDetail ? new Set(runDetail.snapshots.map((snapshot) => snapshot.originHost)).size : 0;
+  const citationCount = runDetail?.generatedDraft?.citationSnapshotIds.length ?? 0;
 
   return (
     <div className="stack">
@@ -365,8 +480,9 @@ export function AutomationControlCenter({
                 <div>
                   <strong>{schedule.name}</strong>
                   <p className="muted">
-                    {schedule.cronExpression} · {schedule.timezone} · {schedule.status} · 다음 실행 {formatDateTime(schedule.nextPlannedRunAt)}
+                    {schedule.cronExpression} · {schedule.timezone} · {formatScheduleStatus(schedule.status)} · 다음 실행 {formatDateTime(schedule.nextPlannedRunAt)}
                   </p>
+                  <p className="muted">미스파이어 처리: {formatMisfirePolicy(schedule.misfirePolicy)}</p>
                   <p className={`muted ${schedule.syncStatus === "OUT_OF_SYNC" ? "error-text" : ""}`}>
                     {schedule.syncStatus === "OUT_OF_SYNC"
                       ? schedule.syncErrorMessage ?? "Quartz 동기화가 어긋난 상태입니다."
@@ -407,9 +523,9 @@ export function AutomationControlCenter({
                 <tr key={run.id}>
                   <td>{run.runKey}</td>
                   <td>
-                    <span className="status-pill">{run.status}</span>
+                    <span className="status-pill">{formatRunStatus(run.status)}</span>
                   </td>
-                  <td>{run.triggerType}</td>
+                  <td>{formatTriggerType(run.triggerType)}</td>
                   <td>{run.snapshotCount}</td>
                   <td>{formatDateTime(run.completedAt)}</td>
                   <td>
@@ -428,10 +544,11 @@ export function AutomationControlCenter({
           {runDetail ? (
             <>
               <p className="muted">
-                {runDetail.run.status}
+                {formatRunStatus(runDetail.run.status)}
                 {runDetail.run.holdReason ? ` · ${runDetail.run.holdReason}` : ""}
-                {runDetail.run.resolutionStatus ? ` · 처리 상태 ${runDetail.run.resolutionStatus}` : ""}
+                {formatResolutionStatus(runDetail.run.resolutionStatus) ? ` · 처리 상태 ${formatResolutionStatus(runDetail.run.resolutionStatus)}` : ""}
               </p>
+              <p className="muted">{buildRunGuidance(runDetail)}</p>
               <div className="inline-actions">
                 <button type="button" className="secondary-button" disabled={!runDetail.availableActions.canRetry || actionPending !== null} onClick={() => onRetryRun(runDetail.run.id)}>
                   {actionPending === "retry" ? "재시도 중..." : "재시도"}
@@ -448,6 +565,9 @@ export function AutomationControlCenter({
                   <h4>저장된 생성 초안</h4>
                   <p><strong>{runDetail.generatedDraft.title}</strong></p>
                   <p className="muted">{runDetail.generatedDraft.excerpt}</p>
+                  <p className="muted">
+                    인용 스냅샷 {citationCount}건 · 독립 출처 호스트 {uniqueOriginHosts}개
+                  </p>
                   <pre className="code-block">{runDetail.generatedDraft.contentMarkdown}</pre>
                 </article>
               ) : null}
@@ -456,8 +576,9 @@ export function AutomationControlCenter({
                   <li key={snapshot.id}>
                     <strong>{snapshot.title}</strong>
                     <span className="muted">
-                      {snapshot.originHost} · {snapshot.policyResult} · {snapshot.canonicalUrl}
+                      {snapshot.originHost} · {formatPolicyResult(snapshot.policyResult)} · HTTP {snapshot.httpStatus} · 수집 {formatDateTime(snapshot.retrievedAt)}
                     </span>
+                    <span className="muted">{snapshot.canonicalUrl}</span>
                   </li>
                 ))}
               </ul>
@@ -471,7 +592,7 @@ export function AutomationControlCenter({
       {diagnostics ? (
         <article className="admin-card stack">
           <div className="inline-actions">
-            <h3>Operational diagnostics</h3>
+            <h3>운영 진단 요약</h3>
             <span className="muted">생성 시각 {formatDateTime(diagnostics.generatedAt)}</span>
           </div>
           <ul className="admin-list">
@@ -529,7 +650,7 @@ export function AutomationControlCenter({
                 <td>{event.id}</td>
                 <td>{event.aggregateId}</td>
                 <td>
-                  <span className="status-pill">{event.deliveryStatus}</span>
+                  <span className="status-pill">{formatOutboxStatus(event.deliveryStatus)}</span>
                 </td>
                 <td>{formatDateTime(event.availableAt)}</td>
                 <td>{formatDateTime(event.lastAttemptAt)}</td>
