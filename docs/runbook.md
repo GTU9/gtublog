@@ -60,3 +60,17 @@ Resolve any returned rows through an audited operational decision before migrati
 - `pnpm audit --prod --audit-level moderate`
 - Confirm the `Security` workflow passed CodeQL, secret, dependency, and worker image scans.
 - Confirm the GitHub Actions workflow at [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) passed on the story branch or pull request before merge.
+
+## Deployment handoff
+
+Before the first real deployment, confirm the target environment follows the runtime
+topology and startup order documented in [deployment.md](./deployment.md). In
+particular:
+
+- browser traffic must remain same-origin through the reverse proxy
+- Spring Boot must start and migrate successfully before the worker begins polling
+- production secrets must come from external secret management, not committed files
+- Codex production adapter freeze must remain in force unless the documented canary
+  attestation gate is explicitly satisfied
+- local placeholder values in [../.env.example](../.env.example) must be replaced through
+  the target environment's secret and configuration system

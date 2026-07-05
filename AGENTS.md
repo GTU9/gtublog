@@ -33,6 +33,8 @@ Use package-by-feature in the backend: `auth`, `post`, `taxonomy`, `source`, `au
 
 Execute non-trivial delivery through the approved Autopilot sequence: `deep-interview -> ralplan -> ultragoal -> native subagents when useful -> code-review -> ultraqa`. Reuse approved artifacts and resume durable state rather than restarting completed phases.
 
+The operational verification shape of that loop is documented in [docs/omx-validation-loop.md](./docs/omx-validation-loop.md). Use it as the concrete pass/fail procedure for story completion, review re-entry, and docs-only exceptions.
+
 Story progression policy: when one implementation story is fully verified and its required Git/GitHub workflow is complete, the main agent must automatically open the next planned story and continue implementation without pausing for user confirmation. Do not stop at story boundaries merely to ask whether to proceed. Only pause for destructive, irreversible, credential-gated, external-production, or materially scope-changing decisions, or when missing authority blocks progress.
 
 For each Ultragoal story that benefits from parallel work, use three Codex native subagents. Do not substitute the tmux-based OMX `$team` runtime unless the user explicitly changes this project policy.

@@ -39,6 +39,16 @@ Source contracts: `.omx/specs/deep-interview-automated-content-blog.md`, `.omx/p
   - Add metrics, health checks, runbooks, backup/restore and restart drills, dependency/secret/static analysis, security headers, CI workflows, and production configuration documentation.
   - Pass backend checks, frontend and worker lint/typecheck/test/build, MySQL integration, contract tests, Playwright, compose validation, code review, architecture invariant audit, and adversarial UltraQA.
 
+## Current expanded execution order
+
+- Story 13 ??Generation worker runtime hardening
+- Story 14 ??Release security closure
+- Story 15 ??Full-stack E2E validation
+- Story 16 ??Automation configuration administration
+- Story 17 ??Held-run administrative actions
+- Story 18 ??Deployment and operations readiness
+- Story 19 ??Automation quality and UX hardening
+
 ## Constraints
 
 - Every implementation story starts from `prototype`, uses a dedicated story branch and Korean GitHub issue, and merges through a clean pull request.

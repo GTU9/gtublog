@@ -58,3 +58,10 @@ recorded within `GENERATION_READINESS_MAX_AGE_MS`.
 
 The Codex adapter remains unavailable by default. Local Codex App login state is not a
 valid unattended credential and must never be mounted into the runtime container.
+
+## Cross-reference documents
+
+- Deployment topology and production startup order: [deployment.md](./deployment.md)
+- Operator drills and recovery procedure: [runbook.md](./runbook.md)
+- Browser/security boundary requirements: [security.md](./security.md)
+- Environment-variable baseline: [../.env.example](../.env.example)
