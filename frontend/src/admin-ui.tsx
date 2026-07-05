@@ -21,12 +21,12 @@ import type {
 
 function formatDateTime(value: string | null) {
   if (!value) {
-    return "Not scheduled";
+    return "없음";
   }
 
-  return new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat("ko-KR", {
     year: "numeric",
-    month: "short",
+    month: "long",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
@@ -95,58 +95,58 @@ export function DashboardStats({
     <>
       <div className="admin-stats">
         <article className="admin-card">
-          <h3>Posts</h3>
+          <h3>전체 글</h3>
           <p className="stat-value">{posts?.totalElements ?? 0}</p>
         </article>
         <article className="admin-card">
-          <h3>Published</h3>
+          <h3>발행 완료</h3>
           <p className="stat-value">{publishedCount}</p>
         </article>
         <article className="admin-card">
-          <h3>Categories</h3>
+          <h3>카테고리</h3>
           <p className="stat-value">{categories.length}</p>
         </article>
         <article className="admin-card">
-          <h3>Audit rows</h3>
+          <h3>감사 로그</h3>
           <p className="stat-value">{audit?.totalElements ?? 0}</p>
         </article>
       </div>
 
       <div className="admin-grid">
         <article className="admin-card">
-          <h3>Recent posts</h3>
+          <h3>최근 글</h3>
           <ul className="admin-list">
             {posts?.items.slice(0, 5).map((post) => (
               <li key={post.id}>
                 <Link href={`/admin/posts/${post.id}`}>{post.title}</Link>
                 <span className="status-pill">{post.status}</span>
               </li>
-            )) ?? <li className="muted">No posts loaded yet.</li>}
+            )) ?? <li className="muted">아직 불러온 글이 없습니다.</li>}
           </ul>
         </article>
 
         <article className="admin-card">
-          <h3>Recent audit actions</h3>
+          <h3>최근 운영 기록</h3>
           <ul className="admin-list">
             {audit?.items.slice(0, 5).map((entry) => (
               <li key={entry.id}>
                 <strong>{entry.actionType}</strong>
                 <span className="muted">{formatDateTime(entry.createdAt)}</span>
               </li>
-            )) ?? <li className="muted">No audit rows loaded yet.</li>}
+            )) ?? <li className="muted">최근 감사 로그가 없습니다.</li>}
           </ul>
         </article>
 
         <article className="admin-card">
-          <h3>Taxonomy coverage</h3>
+          <h3>분류 현황</h3>
           <ul className="admin-list">
             <li>
-              <strong>Categories</strong>
-              <span className="muted">{categories.map((item) => item.name).join(", ") || "None"}</span>
+              <strong>카테고리</strong>
+              <span className="muted">{categories.map((item) => item.name).join(", ") || "없음"}</span>
             </li>
             <li>
-              <strong>Tags</strong>
-              <span className="muted">{tags.map((item) => item.name).join(", ") || "None"}</span>
+              <strong>태그</strong>
+              <span className="muted">{tags.map((item) => item.name).join(", ") || "없음"}</span>
             </li>
           </ul>
         </article>
@@ -401,11 +401,11 @@ export function AutomationOverview({
 
 export function AdminPostsTable({ page }: { page: AdminPostPage | null }) {
   if (!page) {
-    return <LoadingCard message="Loading post inventory..." />;
+    return <LoadingCard message="글 목록을 불러오는 중입니다..." />;
   }
 
   if (page.items.length === 0) {
-    return <MessageCard title="No posts yet" description="Create the first draft to start managing content." />;
+    return <MessageCard title="아직 글이 없습니다" description="첫 번째 초안을 만들어 글 관리를 시작하세요." />;
   }
 
   return (
@@ -413,12 +413,12 @@ export function AdminPostsTable({ page }: { page: AdminPostPage | null }) {
       <table className="admin-table">
         <thead>
           <tr>
-            <th>Title</th>
-            <th>Status</th>
-            <th>Published</th>
-            <th>Categories</th>
-            <th>Tags</th>
-            <th>Action</th>
+            <th>제목</th>
+            <th>상태</th>
+            <th>발행 일시</th>
+            <th>카테고리</th>
+            <th>태그</th>
+            <th>작업</th>
           </tr>
         </thead>
         <tbody>
@@ -432,7 +432,7 @@ export function AdminPostsTable({ page }: { page: AdminPostPage | null }) {
               <td>{post.categories.join(", ") || "-"}</td>
               <td>{post.tags.join(", ") || "-"}</td>
               <td>
-                <Link href={`/admin/posts/${post.id}`}>Open editor</Link>
+                <Link href={`/admin/posts/${post.id}`}>편집 열기</Link>
               </td>
             </tr>
           ))}
@@ -475,7 +475,7 @@ export function TaxonomyManager({
 
       <form className="stack" onSubmit={onSubmit}>
         <label className="field">
-          <span>Name</span>
+          <span>이름</span>
           <input name="name" defaultValue={form.name} key={`name-${form.editingId ?? "new"}-${form.name}`} required />
         </label>
         <label className="field">
@@ -483,7 +483,7 @@ export function TaxonomyManager({
           <input name="slug" defaultValue={form.slug} key={`slug-${form.editingId ?? "new"}-${form.slug}`} />
         </label>
         <label className="field">
-          <span>Description</span>
+          <span>설명</span>
           <textarea
             name="description"
             defaultValue={form.description}
@@ -506,10 +506,10 @@ export function TaxonomyManager({
             </div>
             <div className="inline-actions">
               <button type="button" className="secondary-button" onClick={() => onEdit(item)}>
-                Edit
+                수정
               </button>
               <button type="button" className="danger-button" onClick={() => onDelete(item.id)}>
-                Delete
+                삭제
               </button>
             </div>
           </li>
@@ -521,7 +521,7 @@ export function TaxonomyManager({
 
 export function AuditTable({ page }: { page: AuditPage | null }) {
   if (!page) {
-    return <LoadingCard message="Loading audit trail..." />;
+    return <LoadingCard message="감사 로그를 불러오는 중입니다..." />;
   }
 
   return (
@@ -529,11 +529,11 @@ export function AuditTable({ page }: { page: AuditPage | null }) {
       <table className="admin-table">
         <thead>
           <tr>
-            <th>When</th>
-            <th>Actor</th>
-            <th>Target</th>
-            <th>Action</th>
-            <th>Details</th>
+            <th>시각</th>
+            <th>행위자</th>
+            <th>대상</th>
+            <th>작업</th>
+            <th>세부 정보</th>
           </tr>
         </thead>
         <tbody>
@@ -601,22 +601,22 @@ export function PostEditor({
           onSubmit={onSubmit}
         >
           <div className="inline-actions">
-            <h3>{mode === "create" ? "Create draft" : "Edit post"}</h3>
+            <h3>{mode === "create" ? "초안 작성" : "글 편집"}</h3>
             {detail ? <span className="status-pill">{detail.status}</span> : null}
           </div>
 
           <label className="field">
             <span>Slug</span>
-            <input name="slug" defaultValue={detail?.slug ?? ""} placeholder="leave blank to auto-generate" />
+            <input name="slug" defaultValue={detail?.slug ?? ""} placeholder="비워두면 자동 생성됩니다" />
           </label>
 
           <label className="field">
-            <span>Title</span>
+            <span>제목</span>
             <input name="title" defaultValue={detail?.title ?? ""} required />
           </label>
 
           <label className="field">
-            <span>Excerpt</span>
+            <span>요약</span>
             <textarea name="excerpt" defaultValue={detail?.excerpt ?? ""} rows={3} required />
           </label>
 
@@ -626,12 +626,12 @@ export function PostEditor({
           </label>
 
           <label className="field">
-            <span>Revision note</span>
-            <input name="revisionNote" defaultValue="" placeholder="What changed in this revision?" />
+            <span>리비전 메모</span>
+            <input name="revisionNote" defaultValue="" placeholder="이번 수정에서 달라진 점을 적어 주세요" />
           </label>
 
           <fieldset className="field-group">
-            <legend>Categories</legend>
+            <legend>카테고리</legend>
             <div className="checkbox-grid">
               {categories.map((item) => (
                 <label key={item.id} className="checkbox-item">
@@ -643,7 +643,7 @@ export function PostEditor({
           </fieldset>
 
           <fieldset className="field-group">
-            <legend>Tags</legend>
+            <legend>태그</legend>
             <div className="checkbox-grid">
               {tags.map((item) => (
                 <label key={item.id} className="checkbox-item">
@@ -658,22 +658,22 @@ export function PostEditor({
 
           <div className="inline-actions">
             <button type="submit" disabled={saving}>
-              {saving ? "Saving..." : mode === "create" ? "Create draft" : "Save changes"}
+              {saving ? "저장 중..." : mode === "create" ? "초안 저장" : "변경 저장"}
             </button>
 
             {mode === "edit" ? (
               <>
                 <button type="button" className="secondary-button" onClick={() => onAction("publish")}>
-                  Publish
+                  발행
                 </button>
                 <button type="button" className="secondary-button" onClick={() => onAction("archive")}>
-                  Archive
+                  보관
                 </button>
                 <button type="button" className="danger-button" onClick={() => onAction("delete")}>
-                  Delete
+                  삭제
                 </button>
                 <button type="button" className="secondary-button" onClick={() => onAction("restore")}>
-                  Restore draft
+                  초안 복원
                 </button>
               </>
             ) : null}
@@ -681,12 +681,12 @@ export function PostEditor({
         </form>
 
         <article className="admin-card stack">
-          <h3>Preview</h3>
+          <h3>미리보기</h3>
           <div className="post-detail">
             <div
               className="content-render"
               dangerouslySetInnerHTML={{
-                __html: previewHtml || "<p>Start typing markdown to preview the article content.</p>",
+                __html: previewHtml || "<p>마크다운을 입력하면 글 미리보기가 여기에 표시됩니다.</p>",
               }}
             />
           </div>
@@ -696,18 +696,18 @@ export function PostEditor({
       {mode === "edit" ? (
         <article className="admin-card stack">
           <div className="inline-actions">
-            <h3>Revision history</h3>
-            <span className="muted">{revisions.length} revisions</span>
+            <h3>리비전 기록</h3>
+            <span className="muted">{revisions.length}건</span>
           </div>
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Revision</th>
-                <th>Title</th>
-                <th>Source</th>
-                <th>Note</th>
-                <th>When</th>
-                <th>Action</th>
+                <th>리비전</th>
+                <th>제목</th>
+                <th>출처</th>
+                <th>메모</th>
+                <th>시각</th>
+                <th>작업</th>
               </tr>
             </thead>
             <tbody>
@@ -720,7 +720,7 @@ export function PostEditor({
                   <td>{formatDateTime(revision.createdAt)}</td>
                   <td>
                     <button type="button" className="secondary-button" onClick={() => onRestoreRevision(revision.revisionNumber)}>
-                      Restore this revision
+                      이 리비전 복원
                     </button>
                   </td>
                 </tr>

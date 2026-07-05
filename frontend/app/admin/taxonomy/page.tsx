@@ -42,7 +42,7 @@ export default function AdminTaxonomyPage() {
         setTags(loadedTags);
       } catch {
         if (active) {
-          setError("Unable to load taxonomy management data.");
+          setError("분류 관리 데이터를 불러올 수 없습니다.");
         }
       }
     })();
@@ -82,7 +82,7 @@ export default function AdminTaxonomyPage() {
 
     setCategoryEditingId(null);
     setCategoryForm({ name: "", slug: "", description: "" });
-    setMessage("Category changes saved.");
+    setMessage("카테고리 변경 사항을 저장했습니다.");
     const [loadedCategories, loadedTags] = await reloadTaxonomy();
     setCategories(loadedCategories);
     setTags(loadedTags);
@@ -100,7 +100,7 @@ export default function AdminTaxonomyPage() {
 
     setTagEditingId(null);
     setTagForm({ name: "", slug: "", description: "" });
-    setMessage("Tag changes saved.");
+    setMessage("태그 변경 사항을 저장했습니다.");
     const [loadedCategories, loadedTags] = await reloadTaxonomy();
     setCategories(loadedCategories);
     setTags(loadedTags);
@@ -108,7 +108,7 @@ export default function AdminTaxonomyPage() {
 
   async function handleDeleteCategory(id: number) {
     await deleteCategory(auth.authenticatedFetch, id);
-    setMessage("Category deleted.");
+    setMessage("카테고리를 삭제했습니다.");
     const [loadedCategories, loadedTags] = await reloadTaxonomy();
     setCategories(loadedCategories);
     setTags(loadedTags);
@@ -116,7 +116,7 @@ export default function AdminTaxonomyPage() {
 
   async function handleDeleteTag(id: number) {
     await deleteTag(auth.authenticatedFetch, id);
-    setMessage("Tag deleted.");
+    setMessage("태그를 삭제했습니다.");
     const [loadedCategories, loadedTags] = await reloadTaxonomy();
     setCategories(loadedCategories);
     setTags(loadedTags);
@@ -125,31 +125,31 @@ export default function AdminTaxonomyPage() {
   return (
     <section className="stack">
       <AdminPageHeader
-        title="Taxonomy"
-        description="Create, edit, and prune categories and tags used by published content."
+        title="분류 관리"
+        description="공개 글에 사용하는 카테고리와 태그를 생성, 수정, 정리합니다."
       />
-      {message ? <MessageCard title="Taxonomy updated" description={message} tone="success" /> : null}
-      {error ? <MessageCard title="Taxonomy unavailable" description={error} tone="error" /> : null}
+      {message ? <MessageCard title="분류 구성을 업데이트했습니다" description={message} tone="success" /> : null}
+      {error ? <MessageCard title="분류 관리 화면을 불러올 수 없습니다" description={error} tone="error" /> : null}
       <div className="admin-grid">
         <TaxonomyManager
-          title="Categories"
-          description="Use categories for broad topical grouping across the blog."
+          title="카테고리"
+          description="블로그 전체에서 큰 주제 축을 나누는 분류입니다."
           items={categories}
           form={{ ...categoryForm, editingId: categoryEditingId }}
           onSubmit={(event) => void handleCategorySubmit(event)}
           onEdit={editCategory}
           onDelete={(id) => void handleDeleteCategory(id)}
-          submitLabel={categoryEditingId ? "Update category" : "Create category"}
+          submitLabel={categoryEditingId ? "카테고리 수정" : "카테고리 추가"}
         />
         <TaxonomyManager
-          title="Tags"
-          description="Use tags for narrower cross-cutting labels and search refinement."
+          title="태그"
+          description="세부 키워드와 교차 주제를 묶어 탐색성을 높입니다."
           items={tags}
           form={{ ...tagForm, editingId: tagEditingId }}
           onSubmit={(event) => void handleTagSubmit(event)}
           onEdit={editTag}
           onDelete={(id) => void handleDeleteTag(id)}
-          submitLabel={tagEditingId ? "Update tag" : "Create tag"}
+          submitLabel={tagEditingId ? "태그 수정" : "태그 추가"}
         />
       </div>
     </section>
