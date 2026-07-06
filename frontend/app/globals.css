@@ -380,10 +380,17 @@ img {
   gap: 0.5rem;
 }
 
+.admin-app-shell {
+  width: min(1440px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 1rem 0 3rem;
+}
+
 .admin-shell {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
-  gap: 1.5rem;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: 2rem;
+  align-items: start;
 }
 
 .admin-sidebar {
@@ -393,14 +400,34 @@ img {
   display: grid;
   gap: 1rem;
   padding: 1.25rem;
-  border-radius: 1.25rem;
-  background: rgba(15, 23, 33, 0.92);
-  border: 1px solid rgba(125, 211, 252, 0.12);
+  border-radius: 1.5rem;
+  background: linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(30, 41, 59, 0.94));
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
+  color: #f8fafc;
+}
+
+.admin-sidebar h1 {
+  margin: 0.4rem 0 0;
+  color: #f8fafc;
+  font-size: 1.55rem;
+  line-height: 1.25;
+}
+
+.admin-sidebar .eyebrow {
+  color: #6ee7b7;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.admin-sidebar .muted {
+  color: rgba(226, 232, 240, 0.72);
 }
 
 .admin-panel {
   display: grid;
   gap: 1rem;
+  min-width: 0;
 }
 
 .admin-nav {
@@ -408,7 +435,7 @@ img {
   gap: 0.5rem;
 }
 
-.admin-nav a,
+.admin-nav-link,
 .primary-link-button,
 button {
   display: inline-flex;
@@ -426,10 +453,29 @@ button {
   text-decoration: none;
 }
 
-.admin-nav a,
-.secondary-button,
-.danger-button {
+.admin-nav-link,
+.admin-sidebar > .secondary-button {
   width: 100%;
+}
+
+.admin-nav-link {
+  justify-content: flex-start;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e5eef7;
+  border-color: rgba(148, 163, 184, 0.18);
+}
+
+.admin-nav-link:hover {
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.admin-nav-link.is-active {
+  background: linear-gradient(135deg, #19a974, #0f8b67);
+  color: #ffffff;
+  border-color: rgba(16, 185, 129, 0.55);
+  box-shadow: 0 14px 26px rgba(15, 139, 103, 0.28);
 }
 
 .secondary-button {
@@ -438,8 +484,9 @@ button {
 }
 
 .danger-button {
-  background: rgba(239, 68, 68, 0.16);
-  color: #fecaca;
+  background: #fff1f2;
+  color: #be123c;
+  border-color: #fecdd3;
 }
 
 .admin-login-page {
@@ -453,6 +500,7 @@ button {
   justify-content: space-between;
   gap: 1rem;
   align-items: flex-end;
+  padding: 0.25rem 0 0.5rem;
 }
 
 .admin-hero h2,
@@ -470,6 +518,11 @@ button {
   display: grid;
   gap: 1rem;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.taxonomy-grid {
+  grid-template-columns: repeat(2, minmax(320px, 1fr));
+  align-items: start;
 }
 
 .admin-grid-wide {
@@ -494,7 +547,7 @@ button {
   display: flex;
   justify-content: space-between;
   gap: 1rem;
-  align-items: center;
+  align-items: flex-start;
   padding-bottom: 0.85rem;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
 }
@@ -528,17 +581,18 @@ button {
 .field textarea {
   width: 100%;
   border-radius: 0.9rem;
-  border: 1px solid rgba(148, 163, 184, 0.24);
+  border: 1px solid #d6dde3;
   padding: 0.85rem 1rem;
   font: inherit;
-  background: rgba(15, 23, 33, 0.92);
-  color: #f8fafc;
+  background: #ffffff;
+  color: #111827;
 }
 
 .field-group {
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 1rem;
   padding: 1rem;
+  background: #f8fbfc;
 }
 
 .checkbox-grid {
@@ -553,6 +607,17 @@ button {
   gap: 0.75rem;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.inline-actions {
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+.inline-actions .secondary-button,
+.inline-actions .danger-button {
+  width: auto;
+  min-width: 88px;
 }
 
 .status-pill {
@@ -626,12 +691,62 @@ code {
 
   .admin-shell,
   .admin-grid-wide,
-  .content-layout {
+  .content-layout,
+  .taxonomy-grid {
     grid-template-columns: 1fr;
   }
 
   .admin-sidebar,
   .content-aside {
+    position: static;
+  }
+
+  .admin-app-shell {
+    width: min(100%, calc(100% - 1rem));
+  }
+
+  .admin-sidebar {
+    gap: 0.85rem;
+    padding: 1rem;
+    border-radius: 1.2rem;
+  }
+
+  .admin-sidebar h1 {
+    font-size: 1.2rem;
+  }
+
+  .admin-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .admin-nav-link,
+  .admin-sidebar > .secondary-button {
+    min-height: 52px;
+    padding: 0.8rem 0.85rem;
+    justify-content: center;
+  }
+
+  .admin-list li {
+    flex-direction: column;
+  }
+
+  .inline-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 520px) {
+  .admin-app-shell {
+    width: min(100%, calc(100% - 0.75rem));
+    padding-top: 0.75rem;
+  }
+
+  .admin-nav {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-sidebar {
     position: static;
   }
 }

@@ -130,7 +130,7 @@ export default function AdminTaxonomyPage() {
       />
       {message ? <MessageCard title="분류 구성을 업데이트했습니다" description={message} tone="success" /> : null}
       {error ? <MessageCard title="분류 관리 화면을 불러올 수 없습니다" description={error} tone="error" /> : null}
-      <div className="admin-grid">
+      <div className="admin-grid taxonomy-grid">
         <TaxonomyManager
           title="카테고리"
           description="블로그 전체에서 큰 주제 축을 나누는 분류입니다."
