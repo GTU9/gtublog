@@ -1,39 +1,39 @@
-# Runbook
+# 운영 런북
 
-## Daily checks
+## 일일 점검
 
-1. Check `/actuator/health` and `/actuator/prometheus`.
-2. Open `/admin/automation` and review:
-   - held runs
-   - failed runs
-   - pending outbox events
-   - recent hold reasons
-3. Confirm the latest published post appears in public pages, RSS, and sitemap after automation succeeds.
+1. `/actuator/health`와 `/actuator/prometheus`를 확인합니다.
+2. `/admin/automation`을 열어 아래 항목을 검토합니다.
+   - held run
+   - failed run
+   - pending outbox event
+   - 최근 hold reason
+3. 자동화가 성공한 뒤 최신 발행 글이 public page, RSS, sitemap에 반영되었는지 확인합니다.
 
-## Backup and restore drill
+## 백업 / 복원 drill
 
-Recommended local verification steps:
+권장 로컬 검증 순서는 다음과 같습니다.
 
-0. Optional automation: run `pnpm drill:backup-restore` to execute the publish -> dump -> restore -> login/public/diagnostics verification flow with disposable MySQL 8.4 containers.
-1. Export MySQL schema and data with a timestamped dump.
-2. Restore into a fresh MySQL 8.4 instance.
-3. Run Flyway validation and application startup with `ddl-auto=validate`.
-4. Confirm administrator login, public post reads, and automation diagnostics after restore.
+0. 선택 사항: `pnpm drill:backup-restore`를 실행해 publish → dump → restore → login/public/diagnostics 검증 흐름을 disposable MySQL 8.4 container로 자동화합니다.
+1. 타임스탬프가 포함된 MySQL dump로 schema와 data를 백업합니다.
+2. 새로운 MySQL 8.4 인스턴스에 복원합니다.
+3. `ddl-auto=validate` 상태로 Flyway validation과 애플리케이션 기동을 확인합니다.
+4. 복원 후 administrator login, public post 조회, automation diagnostics를 확인합니다.
 
-## Restart drill
+## 재시작 drill
 
-Optional automation: run `pnpm drill:restart-recovery` to execute the pending-outbox replay across backend restart, compatible worker claim, and expired-run recovery flow on disposable infrastructure.
+선택 사항: `pnpm drill:restart-recovery`를 실행해 pending-outbox replay, backend restart, compatible worker claim, expired-run recovery 흐름을 disposable infrastructure에서 검증합니다.
 
-1. Trigger a manual automation run.
-2. Restart the backend during or after outbox creation.
-3. Verify the run remains recoverable and pending outbox events can be replayed safely.
-4. Restart the generation worker and confirm the next compatible job can still be claimed.
-5. Force a test run lease into the past, execute the recovery sweep, and confirm the run becomes `FAILED`, its job becomes `CANCELLED`, and exactly one `AUTOMATION_RUN_RECOVERED_AS_FAILED` audit event exists.
-6. For deterministic operator recovery, an administrator may call `POST /api/v1/admin/automation/runs/{runId}/recovery`. For batch recovery, use `POST /api/v1/admin/automation/recovery/process`.
+1. manual automation run을 하나 실행합니다.
+2. outbox가 생성되는 도중 또는 그 직후 backend를 재시작합니다.
+3. run이 복구 가능한 상태로 유지되고 pending outbox event를 안전하게 재처리할 수 있는지 확인합니다.
+4. generation-worker를 재시작하고 다음 compatible job을 계속 claim할 수 있는지 확인합니다.
+5. 테스트용 run lease를 과거 시점으로 강제로 이동시킨 뒤 recovery sweep을 실행하고, run이 `FAILED`, job이 `CANCELLED`가 되며 `AUTOMATION_RUN_RECOVERED_AS_FAILED` 감사 이벤트가 정확히 1건만 남는지 확인합니다.
+6. deterministic operator recovery가 필요하면 관리자가 `POST /api/v1/admin/automation/runs/{runId}/recovery`를 호출할 수 있습니다. batch recovery는 `POST /api/v1/admin/automation/recovery/process`를 사용합니다.
 
-## Migration preflight
+## 마이그레이션 사전 점검
 
-Before applying `V6__automation_run_recovery.sql`, verify that historical generation jobs contain at most one row per run:
+`V6__automation_run_recovery.sql`을 적용하기 전에, 과거 generation job이 run당 최대 1행만 가지는지 확인합니다.
 
 ```sql
 SELECT run_id, COUNT(*) AS job_count
@@ -42,9 +42,9 @@ GROUP BY run_id
 HAVING COUNT(*) > 1;
 ```
 
-Resolve any returned rows through an audited operational decision before migration. The migration intentionally fails instead of deleting ambiguous job history.
+결과가 반환되면, 해당 행은 감사 가능한 운영 판단으로 먼저 정리해야 합니다. 이 마이그레이션은 모호한 job 이력을 자동 삭제하지 않고 의도적으로 실패하도록 설계되어 있습니다.
 
-## Release gate checklist
+## 릴리스 게이트 체크리스트
 
 - `backend\\gradlew.bat check --no-configuration-cache`
 - `pnpm --dir frontend lint`
@@ -58,19 +58,15 @@ Resolve any returned rows through an audited operational decision before migrati
 - `pnpm exec playwright test`
 - `docker compose config`
 - `pnpm audit --prod --audit-level moderate`
-- Confirm the `Security` workflow passed CodeQL, secret, dependency, and worker image scans.
-- Confirm the GitHub Actions workflow at [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) passed on the story branch or pull request before merge.
+- `Security` 워크플로가 CodeQL, secret, dependency, worker image scan을 통과했는지 확인
+- [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)이 story branch 또는 pull request에서 통과했는지 확인
 
-## Deployment handoff
+## 배포 인수인계
 
-Before the first real deployment, confirm the target environment follows the runtime
-topology and startup order documented in [deployment.md](./deployment.md). In
-particular:
+첫 실제 배포 전에 대상 환경이 [deployment.md](./deployment.md)에 문서화된 runtime topology와 startup order를 따르는지 확인합니다. 특히 아래 항목은 반드시 만족해야 합니다.
 
-- browser traffic must remain same-origin through the reverse proxy
-- Spring Boot must start and migrate successfully before the worker begins polling
-- production secrets must come from external secret management, not committed files
-- Codex production adapter freeze must remain in force unless the documented canary
-  attestation gate is explicitly satisfied
-- local placeholder values in [../.env.example](../.env.example) must be replaced through
-  the target environment's secret and configuration system
+- browser traffic이 reverse proxy를 통해 same-origin으로 유지될 것
+- generation-worker가 polling을 시작하기 전에 Spring Boot가 기동과 migration을 성공적으로 마칠 것
+- production secret은 커밋된 파일이 아니라 외부 secret management에서 주입될 것
+- Codex production adapter freeze는 문서화된 canary attestation gate를 충족하지 않는 한 계속 유지될 것
+- [../.env.example](../.env.example)의 로컬 placeholder 값은 대상 환경의 secret/configuration system으로 대체될 것

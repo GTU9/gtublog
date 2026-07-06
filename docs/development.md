@@ -1,67 +1,61 @@
-# Development baseline
+# 개발 기본선
 
-## Prerequisites
+## 사전 준비
 
 - Java 25 LTS
-- Node.js 24 and pnpm 11.7
-- Docker Desktop or Docker Engine with Compose v2 or newer
+- Node.js 24 및 pnpm 11.7
+- Docker Desktop 또는 Docker Engine + Compose v2 이상
 
-Copy `.env.example` to the ignored `.env` file and replace every placeholder locally. Never commit the resulting file.
+`.env.example`을 무시 대상인 `.env`로 복사한 뒤 placeholder 값을 로컬 값으로 교체합니다. 생성된 `.env` 파일은 절대 커밋하지 않습니다.
 
-Source collection rejects loopback, private, link-local, reserved, and metadata-network destinations by default, including redirect targets. Keep `AUTOMATION_COLLECTION_ALLOWED_PRIVATE_HOSTS` empty outside isolated development and tests. If a local feed is required, list only the exact trusted host names separated by commas; do not use broad network ranges.
+source collection은 기본적으로 loopback, private, link-local, reserved, metadata-network 대상과 그 redirect target을 차단합니다. 격리된 개발/테스트 환경이 아닌 경우 `AUTOMATION_COLLECTION_ALLOWED_PRIVATE_HOSTS`는 비워 두세요. 로컬 feed가 꼭 필요하다면 신뢰하는 정확한 host 이름만 쉼표로 나열하고, 넓은 네트워크 범위는 허용하지 않습니다.
 
-## Start infrastructure
+## 인프라 시작
 
 ```powershell
 docker compose up -d mysql
 docker compose ps
 ```
 
-## Run applications
+## 애플리케이션 실행
 
 ```powershell
 backend\gradlew.bat bootRun
 pnpm --dir frontend dev
 ```
 
-Story 8 adds the shared generation-job contract, internal worker claim/submit API, and provider-neutral worker runtime. Long-running polling/hosting remains an application choice; the repository currently validates the worker through library/runtime tests and backend integration coverage.
+Story 8에서 shared generation-job contract, internal worker claim/submit API, provider-neutral worker runtime이 추가되었습니다. 장기 폴링이나 상시 호스팅 자체는 애플리케이션 선택 사항이며, 현재 저장소는 worker를 library/runtime 테스트와 backend integration coverage로 검증합니다.
 
-## Quality gates
+## 품질 게이트
 
-`pnpm quality` runs the backend clean/check/package gate, Node lint/typecheck/tests/builds, Playwright, and Compose configuration validation. A running Docker daemon is required; without one, the mandatory MySQL Testcontainers task fails the command.
+`pnpm quality`는 backend clean/check/package, Node lint/typecheck/test/build, Playwright, Compose configuration validation을 함께 실행합니다. Docker daemon이 실행 중이어야 하며, 그렇지 않으면 필수 MySQL Testcontainers 작업 때문에 명령이 실패합니다.
 
-The remote baseline lives in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml). It runs the backend check, frontend and generation-worker quality jobs, Playwright E2E, and `docker compose config` on GitHub Actions for `prototype`, `story/**`, and pull requests targeting `prototype`.
+원격 기준선은 [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)에 있습니다. 이 워크플로는 `prototype`, `story/**`, 그리고 `prototype` 대상 pull request에 대해 backend check, frontend / generation-worker 품질 작업, Playwright E2E, `docker compose config`를 실행합니다.
 
-Use the local gate before pushing when possible; use the remote workflow as the merge guard and Linux runner parity check.
+가능하면 push 전에 로컬 게이트를 먼저 통과시키고, 원격 워크플로는 merge guard이자 Linux runner parity check로 사용하세요.
 
-## Real-service browser verification
+## 실서비스 기반 브라우저 검증
 
-Run `pnpm e2e:fullstack` with Docker available. The command creates a disposable
-MySQL 8.4 container, generates an ephemeral RSA signing key pair, starts the real
-Spring API and a production Next build, and verifies login through public SSR publication.
-It removes the database container on success, failure, or termination. Ports default to
-13306 (MySQL), 18080 (Spring), and 13001 (Next) and can be overridden with the
-corresponding `E2E_*_PORT` variables.
+Docker가 사용 가능한 상태에서 `pnpm e2e:fullstack`를 실행합니다. 이 명령은 일회성 MySQL 8.4 컨테이너를 만들고, 임시 RSA signing key pair를 생성하며, 실제 Spring API와 production Next build를 기동한 뒤 public SSR publication까지 포함한 로그인 흐름을 검증합니다. 성공, 실패, 중단 여부와 관계없이 데이터베이스 컨테이너는 정리됩니다. 기본 포트는 13306(MySQL), 18080(Spring), 13001(Next)이며 `E2E_*_PORT` 변수로 덮어쓸 수 있습니다.
 
-This suite explicitly disables development mock fallback. A failed backend request must
-therefore fail the browser test instead of returning fixture content.
-# Generation worker
+이 테스트는 development mock fallback을 명시적으로 비활성화합니다. 따라서 backend 요청이 실패하면 fixture content로 대체되지 않고 브라우저 테스트 자체가 실패해야 합니다.
 
-Copy the generation variables from `.env.example`, build the worker, and use
-`pnpm --dir generation-worker start:once` for a single claim. Exit codes are `0` for no
-job or success, `2` for configuration/authentication/contract failure, `3` for a
-transient backend or provider failure, and `4` for shutdown/timeout. Logs are structured
-JSON and intentionally include only event, worker ID, job ID, category, and status.
-The container health probe runs `node dist/healthcheck.js`; it is ready only while the
-worker process is alive, shutdown has not begun, and a successful backend contact was
-recorded within `GENERATION_READINESS_MAX_AGE_MS`.
+## Generation worker
 
-The Codex adapter remains unavailable by default. Local Codex App login state is not a
-valid unattended credential and must never be mounted into the runtime container.
+`.env.example`의 generation 관련 변수를 채운 뒤 worker를 빌드하고 `pnpm --dir generation-worker start:once`로 단일 claim을 실행할 수 있습니다. 종료 코드는 다음 의미를 갖습니다.
 
-## Cross-reference documents
+- `0`: 작업 없음 또는 성공
+- `2`: 설정 / 인증 / 계약 실패
+- `3`: 일시적인 backend 또는 provider 실패
+- `4`: 종료 / timeout
 
-- Deployment topology and production startup order: [deployment.md](./deployment.md)
-- Operator drills and recovery procedure: [runbook.md](./runbook.md)
-- Browser/security boundary requirements: [security.md](./security.md)
-- Environment-variable baseline: [../.env.example](../.env.example)
+로그는 structured JSON 형식이며, 의도적으로 event, worker ID, job ID, category, status만 포함합니다. 컨테이너 health probe는 `node dist/healthcheck.js`를 사용하며, worker 프로세스가 살아 있고 shutdown이 시작되지 않았으며 `GENERATION_READINESS_MAX_AGE_MS` 안에 성공적인 backend contact가 있을 때만 ready가 됩니다.
+
+Codex adapter는 기본적으로 비활성입니다. 로컬 Codex App 로그인 상태는 unattended credential이 아니며, runtime container에 절대 마운트하면 안 됩니다.
+
+## 교차 참고 문서
+
+- 배포 토폴로지와 production startup order: [deployment.md](./deployment.md)
+- 운영 drill과 복구 절차: [runbook.md](./runbook.md)
+- 브라우저 / 보안 경계 요구사항: [security.md](./security.md)
+- 환경 변수 기준선: [../.env.example](../.env.example)
