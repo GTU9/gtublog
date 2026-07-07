@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
 
+const applicationApiBaseUrl = (
+  process.env.NEXT_PUBLIC_GTUBLOG_APPLICATION_API_BASE_URL
+  ?? process.env.GTUBLOG_APPLICATION_API_BASE_URL
+  ?? "http://127.0.0.1:8080/api/v1"
+).replace(/\/+$/, "");
+
 test("administrator can sign in, create a draft, publish it, and restore a revision", async ({ page }) => {
   await page.goto("/admin/login");
   await page.getByRole("button", { name: "로그인" }).click();
@@ -45,19 +51,29 @@ test("administrator can manage taxonomy and review audit activity", async ({ pag
 });
 
 test("administrator can manage automation configuration and see safe conflict guidance", async ({ page }) => {
-  await page.goto("/admin/login");
-  await page.getByRole("button", { name: "로그인" }).click();
-
-  await page.getByRole("link", { name: "자동화 운영" }).click();
+  await page.route(`${applicationApiBaseUrl}/**`, (route) => route.abort("connectionrefused"));
+  await page.goto("/admin/automation");
   await expect(page.getByRole("heading", { name: "자동화 운영", exact: true })).toBeVisible();
 
   const defaultSourcesPanel = page.getByLabel("자동화 소스 패널");
-  await defaultSourcesPanel.getByRole("button", { name: "삭제" }).first().click({ force: true });
+  const defaultSchedulesPanel = page.getByLabel("자동화 스케줄 패널");
+  const [sourceBox, scheduleBox] = await Promise.all([
+    defaultSourcesPanel.boundingBox(),
+    defaultSchedulesPanel.boundingBox(),
+  ]);
+  expect(sourceBox).not.toBeNull();
+  expect(scheduleBox).not.toBeNull();
+  const panelsOverlap = sourceBox!.x < scheduleBox!.x + scheduleBox!.width
+    && sourceBox!.x + sourceBox!.width > scheduleBox!.x
+    && sourceBox!.y < scheduleBox!.y + scheduleBox!.height
+    && sourceBox!.y + sourceBox!.height > scheduleBox!.y;
+  expect(panelsOverlap).toBe(false);
+
+  await defaultSourcesPanel.getByRole("button", { name: "삭제" }).first().click();
   await expect(page.getByRole("heading", { name: "자동화 화면 오류", exact: true })).toBeVisible();
   await expect(page.getByText("이 소스는 이미 수집 증거에 연결되어 있습니다. 삭제 대신 비활성화하세요.", { exact: true })).toBeVisible();
 
-  const defaultSchedulesPanel = page.getByLabel("자동화 스케줄 패널");
-  await defaultSchedulesPanel.getByRole("button", { name: "삭제" }).first().click({ force: true });
+  await defaultSchedulesPanel.getByRole("button", { name: "삭제" }).first().click();
   await expect(page.getByText("이 스케줄에는 이미 실행 이력이 있습니다. 삭제 대신 비활성화하세요.", { exact: true })).toBeVisible();
 
   await page.getByRole("textbox", { name: "주제명" }).fill("Playwright Automation Topic");
