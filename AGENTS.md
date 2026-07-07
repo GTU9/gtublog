@@ -59,6 +59,7 @@ If code review or UltraQA is not clean, return to the existing Ultragoal story w
 - After verifier approval, the main agent summarizes changed files, creates the Korean GitHub issue, commits on the story branch, pushes it, opens a pull request targeting `prototype`, verifies required checks, and merges only when the pull request is clean.
 - After a story is merged into `prototype`, immediately sync local state, create the next planned story branch from the updated `prototype` head, and continue the delivery loop unless a true blocker from the story progression policy applies.
 - Never bypass the issue-before-commit rule, force-push shared branches, rewrite approved history, or merge a rejected story.
+- If a story-scoped commit is accidentally applied directly to `prototype` and already propagated to the shared remote, do not attempt ad-hoc history rewrites to hide the mistake. Record the policy deviation in a Korean GitHub issue, preserve the shared history, move subsequent work back to a proper story branch from the latest `prototype` head, and resume the normal issue -> story branch -> verification -> PR -> merge flow.
 - If GitHub authentication, repository remote, branch protection, or required external authority is unavailable, preserve the verified local story state and report the exact blocker. Do not create an untracked-policy exception or claim the GitHub workflow completed.
 
 ## Architectural invariants
