@@ -49,6 +49,17 @@ Source contracts: `.omx/specs/deep-interview-automated-content-blog.md`, `.omx/p
 - Story 18 ??Deployment and operations readiness
 - Story 19 ??Automation quality and UX hardening
 
+## Current continuation roadmap from the implemented baseline
+
+- Story 18 — Deployment and operations readiness
+  - 운영용 `compose.prod.yaml`, external MySQL environment contract, reverse-proxy example, startup order, smoke-check, and rollback guidance를 정리한다.
+- Story 19 — Automation quality and UX hardening
+  - 자동화 관리자 화면의 한국어 품질, held-run 설명력, diagnostics 가독성, public/admin copy 일관성을 다듬는다.
+- Story 20 — Container deployment rehearsal and smoke automation
+  - production-like compose를 실제로 기동하고, login/public/admin/automation 경로를 smoke test로 검증하며, restart/rollback 시나리오와 문서 간극을 수리한다.
+
+현재 기준으로는 Story 18 완료 후 Story 19, Story 20 순으로 진행하는 것이 구현 대비 효과가 가장 크다. Story 19는 사용성과 운영 신뢰도를 높이고, Story 20은 실제 배포 리허설을 통해 운영 자산의 누락을 조기 발견하는 역할을 한다.
+
 ## Constraints
 
 - Every implementation story starts from `prototype`, uses a dedicated story branch and Korean GitHub issue, and merges through a clean pull request.

@@ -56,6 +56,7 @@ Codex adapter는 기본적으로 비활성입니다. 로컬 Codex App 로그인 
 ## 교차 참고 문서
 
 - 배포 토폴로지와 production startup order: [deployment.md](./deployment.md)
+- 운영용 Docker Compose/env/proxy 기준선: [../compose.prod.yaml](../compose.prod.yaml), [../.env.production.example](../.env.production.example), [../ops/nginx/production.conf](../ops/nginx/production.conf)
 - 운영 drill과 복구 절차: [runbook.md](./runbook.md)
 - 브라우저 / 보안 경계 요구사항: [security.md](./security.md)
 - 환경 변수 기준선: [../.env.example](../.env.example)

@@ -6,7 +6,7 @@ Improve operator trust and day-to-day usability around automated collection, hel
 
 ## Candidate scope
 
-- P0: Repair remaining Korean text corruption and mixed-language labels in the automation administrator UI so held-run and diagnostics flows are readable without implementation knowledge.
+- P0: Refine automation administrator terminology and mixed-language labels so held-run and diagnostics flows are readable without implementation knowledge.
 - P0: Improve automation run-detail readability, action hierarchy, and resolution-state explanations in the admin UI.
 - P1: Add clearer guidance for held reasons, retry outcomes, cancel semantics, and manual override consequences.
 - P1: Expose stronger generated-draft review context such as citation summary, source diversity, and duplicate-risk hints.
@@ -15,8 +15,8 @@ Improve operator trust and day-to-day usability around automated collection, hel
 
 ## Current evidence motivating the story
 
-- `frontend/src/automation-admin-ui.tsx` still contains corrupted Korean copy in headings, button labels, helper text, and empty states.
-- `frontend/app/admin/automation/page.tsx` still contains corrupted Korean toast/error strings and some English administrator headings.
+- `frontend/src/automation-admin-ui.tsx` still exposes several operator-facing terms (`hold reason`, `resolution status`, `outbox`) too close to implementation language for everyday use.
+- `frontend/app/admin/automation/page.tsx` uses functionally correct toast/error strings, but the wording can be made more operator-oriented and decision-supportive.
 - The current automation detail panel shows raw status and hold values, but operator guidance remains too close to internal implementation wording.
 - Existing E2E coverage proves the main flow works, but it does not yet assert the refined Korean-first operator messaging and decision guidance.
 

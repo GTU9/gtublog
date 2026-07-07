@@ -4,6 +4,8 @@
 
 이 문서는 GTU Blog의 최소 운영 배포 계약을 정의합니다. 특정 클라우드 공급자에 종속되지 않고, 컴포넌트 경계, 시크릿 책임, 기동 순서, 검증, 롤백 기대치를 정리하는 것이 목적입니다.
 
+이 저장소는 운영 자산 기준선으로 [compose.prod.yaml](../compose.prod.yaml), [`.env.production.example`](../.env.production.example), [ops/nginx/production.conf](../ops/nginx/production.conf)를 제공합니다. 운영 대상이 Docker Compose가 아니더라도, 이 파일들이 표현하는 same-origin 경계와 환경 변수 계약은 그대로 유지해야 합니다.
+
 ## 런타임 토폴로지
 
 애플리케이션은 다음 다섯 개의 런타임 면으로 구성됩니다.
@@ -22,6 +24,8 @@
   - 글, 인증, 자동화, 감사, 아웃박스의 시스템 오브 레코드
 - Generation Worker
   - 제한된 워커 계약으로만 작업 claim/submit이 가능한 별도 프로세스
+
+현재 운영 기준선은 “애플리케이션 컨테이너는 저장소에서 제공하고, MySQL은 외부 서버 또는 별도 관리형 서비스로 연결한다”는 가정을 사용합니다. 즉, `compose.prod.yaml`은 frontend/backend/proxy/worker 중심이며 MySQL 컨테이너를 포함하지 않습니다.
 
 ## 표준 브라우저 흐름
 
@@ -49,23 +53,62 @@
 
 ### 2. 환경별로 달라질 수 있는 값
 
+- `PUBLIC_ORIGIN`
 - `SPRING_PROFILES_ACTIVE`
-- `BACKEND_PORT`
-- `FRONTEND_PORT`
 - `AUTH_ALLOWED_ORIGIN`
 - `AUTH_COOKIE_SECURE`
 - `AUTH_ISSUER`
 - `AUTH_AUDIENCE`
 - `AUTOMATION_REVALIDATION_BASE_URL`
+- `GTUBLOG_SITE_URL`
+- `GTUBLOG_PUBLIC_API_BASE_URL`
+- `GTUBLOG_APPLICATION_API_BASE_URL`
+- `NEXT_PUBLIC_GTUBLOG_APPLICATION_API_BASE_URL`
 - `GENERATION_BACKEND_BASE_URL`
 - `GENERATION_PROVIDER`
+- `PROXY_PORT`
 
 ### 3. 운영 기본값 기대치
 
 - `AUTH_COOKIE_SECURE=true`
 - `AUTH_ALLOWED_ORIGIN`은 공개 오리진과 정확히 일치
+- 브라우저에서 쓰는 `NEXT_PUBLIC_GTUBLOG_APPLICATION_API_BASE_URL`은 same-origin 유지를 위해 `/api/v1` 같은 상대 경로를 권장
+- Next 서버 런타임이 Spring 공개/관리자 API를 직접 호출해야 하므로 `GTUBLOG_PUBLIC_API_BASE_URL`, `GTUBLOG_APPLICATION_API_BASE_URL`은 보통 내부 네트워크 절대 주소를 사용
 - `AUTOMATION_COLLECTION_ALLOWED_PRIVATE_HOSTS`는 승인된 격리망 요구가 없는 한 비워둘 것
 - `GENERATION_PROVIDER`는 canary attestation 조건이 충족되기 전까지 Codex production 모드로 전환하지 말 것
+
+## 저장소 제공 운영 자산
+
+- [compose.prod.yaml](../compose.prod.yaml)
+  - `proxy`, `frontend`, `backend`, `generation-worker`를 기본 서비스로 제공
+  - `prometheus`, `grafana`는 `ops` profile에서 선택적으로 활성화
+- [`.env.production.example`](../.env.production.example)
+  - 외부 MySQL, 공개 오리진, 인증 키, 워커 토큰, 관측 계정 값을 주입하는 예시
+- [ops/nginx/production.conf](../ops/nginx/production.conf)
+  - `/api/v1/**`는 Spring Boot, 그 외 브라우저 요청은 Next.js로 보내는 same-origin 예시
+- [ops/prometheus/production.yml](../ops/prometheus/production.yml)
+  - backend 컨테이너의 `/actuator/prometheus`를 수집하는 production compose 기준 scrape 대상
+
+## 운영용 Compose 기동 예시
+
+1. 예시 환경 파일을 실제 값으로 복사/수정합니다.
+
+```powershell
+Copy-Item .env.production.example .env.production
+```
+
+2. 외부 MySQL 접속 정보와 운영 시크릿을 채웁니다.
+3. 운영 스택을 기동합니다.
+
+```powershell
+docker compose --env-file .env.production -f compose.prod.yaml up -d --build
+```
+
+4. 관측 스택까지 필요하면 `ops` profile을 함께 사용합니다.
+
+```powershell
+docker compose --env-file .env.production -f compose.prod.yaml --profile ops up -d --build
+```
 
 ## 기동 순서
 
@@ -77,6 +120,8 @@
 3. Next.js를 시작하고 공개/관리자 라우트 렌더링을 확인합니다.
 4. Spring Boot가 정상 상태가 된 뒤 generation-worker를 시작합니다.
 5. 리버스 프록시가 same-origin 경로를 올바르게 전달하는지 확인합니다.
+
+`compose.prod.yaml`은 위 순서를 그대로 반영하도록 backend healthcheck 이후 worker와 proxy가 의존하도록 구성되어 있습니다.
 
 ## 운영 스모크 체크
 
@@ -101,6 +146,8 @@
 - 운영에서 브라우저용 API 오리진을 별도로 노출하지 않습니다.
 - HTTPS를 강제하고 HTTP는 HTTPS로 리다이렉트합니다.
 - 관리자 편집과 워커 계약에 맞는 요청 본문 크기 제한을 설정합니다.
+
+저장소에 포함된 `ops/nginx/production.conf`는 최소 예시이며, 실제 TLS 종료와 인증서 관리 방식은 운영 환경에 맞게 바꿔도 됩니다. 단, `/api/v1/**`와 나머지 브라우저 요청의 분리 규칙은 유지해야 합니다.
 
 ## 로깅과 관측성
 
@@ -153,6 +200,7 @@
 - `pnpm --dir generation-worker build`
 - `pnpm exec playwright test`
 - `docker compose config`
+- `docker compose --env-file .env.production.example -f compose.prod.yaml config`
 - GitHub CI와 Security 워크플로가 릴리스 후보 브랜치에서 모두 녹색
 
 ## 현재 비목표

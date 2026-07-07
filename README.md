@@ -258,6 +258,42 @@ pnpm --dir generation-worker start:once
 docker compose up -d prometheus grafana
 ```
 
+## 운영용 컨테이너 배포 기준
+
+운영 환경에서는 로컬 개발용 [compose.yaml](./compose.yaml) 대신 외부 MySQL을 전제로 한 [compose.prod.yaml](./compose.prod.yaml)을 사용합니다.
+
+- 포함 대상
+  - `proxy`: same-origin reverse proxy
+  - `frontend`: Next.js production container
+  - `backend`: Spring Boot production container
+  - `generation-worker`: 자동화 워커
+  - `prometheus`, `grafana`: 선택적 `ops` profile
+- 제외 대상
+  - MySQL 컨테이너
+    - 운영 DB는 별도 관리형 MySQL 또는 기존 MySQL 서버를 사용
+
+배포 전에는 [`.env.production.example`](./.env.production.example)을 기준으로 `.env.production`을 만들고, 특히 아래 값을 실제 운영 값으로 교체해야 합니다.
+
+- `PUBLIC_ORIGIN`
+- `MYSQL_HOST`, `MYSQL_PORT`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASSWORD`
+- `AUTH_PUBLIC_KEY_PEM`, `AUTH_PRIVATE_KEY_PEM`
+- `ADMIN_BOOTSTRAP_PASSWORD`
+- `AUTOMATION_WORKER_SHARED_TOKEN`
+- `AUTOMATION_REVALIDATION_SHARED_SECRET`
+
+실행 예시는 다음과 같습니다.
+
+```powershell
+Copy-Item .env.production.example .env.production
+docker compose --env-file .env.production -f compose.prod.yaml up -d --build
+```
+
+운영 관측 스택까지 함께 띄우려면:
+
+```powershell
+docker compose --env-file .env.production -f compose.prod.yaml --profile ops up -d --build
+```
+
 ## 로컬 접속 정보
 
 기본 로컬 설정 기준으로 아래 주소를 사용합니다.
@@ -373,6 +409,7 @@ docker compose config
 - 보류 실행 재시도/취소/수동 발행 구현 완료
 - 관리자 UI 한국어화 및 운영 UX 개선 반영 완료
 - 로컬 백엔드/프론트/Playwright/MySQL 기반 검증 루프 정리 완료
+- 외부 MySQL 기준 운영용 compose/proxy/env 배포 자산 정리 완료
 
 ## 알려진 범위와 비목표
 
@@ -386,6 +423,6 @@ docker compose config
 
 ## 다음 우선순위
 
-- 실배포 리허설 및 운영 검증 스토리 정의
-- 배포 환경 기준 smoke test / 복구 테스트 강화
-- 자동화 품질 고도화와 운영 모니터링 보강
+- 운영 compose 기반 실배포 리허설과 이미지 빌드 검증
+- 자동화 UX 한국어 품질 보강과 진단 가독성 개선
+- 배포 환경 기준 smoke test / 복구 테스트 자동화 보강

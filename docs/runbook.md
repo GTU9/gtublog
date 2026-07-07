@@ -70,3 +70,9 @@ HAVING COUNT(*) > 1;
 - production secret은 커밋된 파일이 아니라 외부 secret management에서 주입될 것
 - Codex production adapter freeze는 문서화된 canary attestation gate를 충족하지 않는 한 계속 유지될 것
 - [../.env.example](../.env.example)의 로컬 placeholder 값은 대상 환경의 secret/configuration system으로 대체될 것
+
+Docker Compose 기반 운영 환경이라면 추가로 아래를 확인합니다.
+
+- [../compose.prod.yaml](../compose.prod.yaml)이 외부 MySQL 주소를 사용하도록 설정되었을 것
+- [../.env.production.example](../.env.production.example)을 복사한 실제 `.env.production`에 공개 오리진, 인증 키, worker token, revalidation secret이 채워져 있을 것
+- reverse proxy 설정이 [../ops/nginx/production.conf](../ops/nginx/production.conf)와 같은 same-origin 라우팅 계약을 유지할 것
