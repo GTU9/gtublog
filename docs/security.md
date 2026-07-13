@@ -27,3 +27,4 @@
 - 관리자 진단 화면은 count와 hold reason만 노출해야 하며, raw credential과 worker token은 제외합니다.
 - 감사 로그는 login success, refresh rotation, replay detection, logout 같은 보안 관련 이벤트의 system of record로 유지됩니다.
 - Pull request에서는 Node dependency audit, repository-history secret scan, CodeQL, lockfile vulnerability scan, hardened worker image scan을 실행합니다. workflow action은 immutable commit에 pin하고, 기본 저장소 권한은 read-only로 유지합니다.
+- Gitleaks가 테스트 전용 fixture를 오탐지할 때도 파일/경로 전체 예외를 두지 않고, 검증된 비운영 테스트 자산에 한해 `.gitleaksignore` fingerprint 단위로만 예외 처리합니다.
