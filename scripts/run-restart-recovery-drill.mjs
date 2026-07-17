@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
+import net from "node:net";
 import process from "node:process";
 
 const windows = process.platform === "win32";
@@ -50,6 +51,44 @@ function run(command, args, options = {}) {
 
 function runDocker(args, options = {}) {
   return run("docker", args, options);
+}
+
+function parseHostPort(name, value) {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`${name} must be an integer between 1 and 65535, but was ${JSON.stringify(value)}.`);
+  }
+  return port;
+}
+
+async function assertHostPortsAvailable(ports) {
+  const configuredPorts = new Map();
+  for (const { name, value } of ports) {
+    const port = parseHostPort(name, value);
+    const existingName = configuredPorts.get(port);
+    if (existingName) {
+      throw new Error(`${name} and ${existingName} both use host port ${port}. Configure distinct ports before starting the restart recovery drill.`);
+    }
+    configuredPorts.set(port, name);
+  }
+
+  await Promise.all([...configuredPorts].map(([port, name]) => new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once("error", (error) => {
+      reject(new Error(
+        `${name} cannot bind 127.0.0.1:${port} for the restart recovery drill (${error.code ?? error.message}). Stop the conflicting process or configure a different port.`,
+      ));
+    });
+    server.listen({ host: "127.0.0.1", port }, () => {
+      server.close((error) => {
+        if (error) {
+          reject(new Error(`Unable to release restart recovery preflight port 127.0.0.1:${port}: ${error.message}`));
+          return;
+        }
+        resolve();
+      });
+    });
+  })));
 }
 
 function sleep(ms) {
@@ -458,6 +497,13 @@ async function waitForRecoveredRun(token, runId) {
   }
   throw new Error("Expired automation run was not recovered to FAILED.");
 }
+
+await assertHostPortsAvailable([
+  { name: "RESTART_E2E_MYSQL_PORT", value: mysqlPort },
+  { name: "RESTART_E2E_BACKEND_PORT", value: backendPort },
+  { name: "RESTART_E2E_FRONTEND_PORT", value: frontendPort },
+  { name: "RESTART_E2E_HELPER_PORT", value: helperPort },
+]);
 
 try {
   startMysqlContainer();

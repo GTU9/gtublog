@@ -14,7 +14,7 @@
 
 권장 로컬 검증 순서는 다음과 같습니다.
 
-0. 선택 사항: `pnpm drill:backup-restore`를 실행해 publish → dump → restore → login/public/diagnostics 검증 흐름을 disposable MySQL 8.4 container로 자동화합니다.
+0. 릴리스 게이트: `pnpm drill:backup-restore`는 publish → dump → restore → login/public/diagnostics 검증 흐름을 disposable MySQL 8.4 container에서 자동화하며, GitHub Actions의 `Backup and restore drill` job도 동일한 명령을 실행합니다.
 1. 타임스탬프가 포함된 MySQL dump로 schema와 data를 백업합니다.
 2. 새로운 MySQL 8.4 인스턴스에 복원합니다.
 3. `ddl-auto=validate` 상태로 Flyway validation과 애플리케이션 기동을 확인합니다.
@@ -22,7 +22,7 @@
 
 ## 재시작 drill
 
-선택 사항: `pnpm drill:restart-recovery`를 실행해 pending-outbox replay, backend restart, compatible worker claim, expired-run recovery 흐름을 disposable infrastructure에서 검증합니다.
+릴리스 게이트: `pnpm drill:restart-recovery`는 pending-outbox replay, backend restart, compatible worker claim, expired-run recovery 흐름을 disposable infrastructure에서 검증하며, GitHub Actions의 `Restart and recovery drill` job도 동일한 명령을 실행합니다. 이 drill의 worker는 외부 Codex 자격증명이 아닌 `fake-provider` 계약을 사용합니다.
 
 1. manual automation run을 하나 실행합니다.
 2. outbox가 생성되는 도중 또는 그 직후 backend를 재시작합니다.
@@ -56,6 +56,8 @@ HAVING COUNT(*) > 1;
 - `pnpm --dir generation-worker test`
 - `pnpm --dir generation-worker build`
 - `pnpm exec playwright test`
+- `pnpm drill:backup-restore` (disposable MySQL 8.4의 publish → dump → restore 검증)
+- `pnpm drill:restart-recovery` (fake-provider의 outbox/restart/lease recovery 검증)
 - `docker compose config`
 - `pnpm rehearsal:compose:preflight` (rehearsal 전용 `.env.rehearsal` 준비 후; 이 검사는 컨테이너 생성이나 MySQL 접속을 하지 않음)
 - 기동된 Compose 프로젝트에 `pnpm smoke:compose` (공개 경로·프록시 차단·backend readiness, 선택적으로 관리자 세션·자동화 진단·게시글 상세 확인)

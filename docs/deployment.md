@@ -164,6 +164,10 @@ pnpm smoke:compose
    - RSS
    - sitemap
 
+## 복구 릴리스 게이트
+
+배포 자산 변경을 포함한 릴리스는 CI의 `Backup and restore drill`과 `Restart and recovery drill`을 통과해야 합니다. 두 job은 disposable MySQL 8.4 container와 fake provider만 사용하므로 실제 운영 데이터나 Codex API key를 사용하지 않습니다. 따라서 이 검증은 복구 계약의 반복 증거이며, 별도의 Codex 무인 자격증명·격리 canary attestation 승인이나 production adapter freeze를 대체하지 않습니다.
+
 ## 리버스 프록시 요구사항
 
 - Spring과 Next가 기대하는 canonical host 및 forwarded protocol 헤더를 보존합니다.
