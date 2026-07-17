@@ -27,7 +27,7 @@
 1. manual automation run을 하나 실행합니다.
 2. outbox가 생성되는 도중 또는 그 직후 backend를 재시작합니다.
 3. run이 복구 가능한 상태로 유지되고 pending outbox event를 안전하게 재처리할 수 있는지 확인합니다.
-4. generation-worker를 재시작하고 다음 compatible job을 계속 claim할 수 있는지 확인합니다.
+4. Codex canary release gate가 승인된 generation-worker만 재시작하고 다음 compatible job을 계속 claim할 수 있는지 확인합니다. 미승인 worker는 기본 Compose 리허설에서 기동하지 않습니다.
 5. 테스트용 run lease를 과거 시점으로 강제로 이동시킨 뒤 recovery sweep을 실행하고, run이 `FAILED`, job이 `CANCELLED`가 되며 `AUTOMATION_RUN_RECOVERED_AS_FAILED` 감사 이벤트가 정확히 1건만 남는지 확인합니다.
 6. deterministic operator recovery가 필요하면 관리자가 `POST /api/v1/admin/automation/runs/{runId}/recovery`를 호출할 수 있습니다. batch recovery는 `POST /api/v1/admin/automation/recovery/process`를 사용합니다.
 
@@ -57,6 +57,8 @@ HAVING COUNT(*) > 1;
 - `pnpm --dir generation-worker build`
 - `pnpm exec playwright test`
 - `docker compose config`
+- `pnpm rehearsal:compose:preflight` (rehearsal 전용 `.env.rehearsal` 준비 후; 이 검사는 컨테이너 생성이나 MySQL 접속을 하지 않음)
+- 기동된 Compose 프로젝트에 `pnpm smoke:compose` (공개 경로·프록시 차단·backend readiness, 선택적으로 관리자 세션·자동화 진단·게시글 상세 확인)
 - `pnpm audit --prod --audit-level moderate`
 - `Security` 워크플로가 CodeQL, secret, dependency, worker image scan을 통과했는지 확인
 - [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)이 story branch 또는 pull request에서 통과했는지 확인
@@ -76,3 +78,4 @@ Docker Compose 기반 운영 환경이라면 추가로 아래를 확인합니다
 - [../compose.prod.yaml](../compose.prod.yaml)이 외부 MySQL 주소를 사용하도록 설정되었을 것
 - [../.env.production.example](../.env.production.example)을 복사한 실제 `.env.production`에 공개 오리진, 인증 키, worker token, revalidation secret이 채워져 있을 것
 - reverse proxy 설정이 [../ops/nginx/production.conf](../ops/nginx/production.conf)와 같은 same-origin 라우팅 계약을 유지할 것
+- 기본 Compose rehearsal은 `proxy`, `frontend`, `backend`만 기동한다. `generation-worker`는 `generation` profile과 외부 canary attestation 파일을 요구하므로 해당 release gate 승인 뒤에만 별도 기동할 것

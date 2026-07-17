@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     depends_on:
       frontend:
-        condition: service_started
+        condition: service_healthy
       backend:
         condition: service_healthy
     ports:
@@ -70,6 +70,7 @@ services:
       start_period: 45s
 
   generation-worker:
+    profiles: ["generation"]
     build:
       context: .
       dockerfile: generation-worker/Dockerfile
@@ -82,6 +83,8 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=256m
       - /home/worker:rw,noexec,nosuid,nodev,size=128m
+    volumes:
+      - ${GENERATION_CODEX_CANARY_ATTESTATION_FILE:-./ops/attestations/unapproved.json}:/run/gtublog/codex-canary-attestation.json:ro
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true
@@ -96,8 +99,9 @@ services:
       GENERATION_BACKEND_BASE_URL: ${GENERATION_BACKEND_BASE_URL:-http://backend:8080}
       GENERATION_WORKER_TOKEN: ${GENERATION_WORKER_TOKEN:-replace-with-production-worker-token}
       GENERATION_WORKER_ID: ${GENERATION_WORKER_ID:-gtublog-worker}
+      GENERATION_PROVIDER: ${GENERATION_PROVIDER:-codex-sdk}
       GENERATION_CODEX_ENV_ISOLATION_APPROVED: ${GENERATION_CODEX_ENV_ISOLATION_APPROVED:-false}
-      GENERATION_CODEX_CANARY_ATTESTATION_PATH: ${GENERATION_CODEX_CANARY_ATTESTATION_PATH:-}
+      GENERATION_CODEX_CANARY_ATTESTATION_PATH: /run/gtublog/codex-canary-attestation.json
       CODEX_API_KEY: ${CODEX_API_KEY:-}
       GENERATION_POLL_INTERVAL_MS: ${GENERATION_POLL_INTERVAL_MS:-5000}
       GENERATION_REQUEST_TIMEOUT_MS: ${GENERATION_REQUEST_TIMEOUT_MS:-10000}

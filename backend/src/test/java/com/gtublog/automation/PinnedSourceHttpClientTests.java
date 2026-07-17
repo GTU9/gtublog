@@ -69,7 +69,7 @@ class PinnedSourceHttpClientTests {
 
     @Test
     void rejectsTlsCertificateThatDoesNotMatchTheOriginalHostname() throws Exception {
-        var server = new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicHttpsPort());
+        var server = new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicPort().dynamicHttpsPort());
         server.start();
         try {
             server.stubFor(get(urlEqualTo("/secure"))

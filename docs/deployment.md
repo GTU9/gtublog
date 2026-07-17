@@ -80,7 +80,8 @@
 ## 저장소 제공 운영 자산
 
 - [compose.prod.yaml](../compose.prod.yaml)
-  - `proxy`, `frontend`, `backend`, `generation-worker`를 기본 서비스로 제공
+  - `proxy`, `frontend`, `backend`를 기본 서비스로 제공
+  - `generation-worker`는 `generation` profile에서만 제공한다. Codex canary attestation 승인 전에는 기본 리허설이 worker 자격 증명을 요구하지 않는다.
   - `prometheus`, `grafana`는 `ops` profile에서 선택적으로 활성화
 - [`.env.production.example`](../.env.production.example)
   - 외부 MySQL, 공개 오리진, 인증 키, 워커 토큰, 관측 계정 값을 주입하는 예시
@@ -91,23 +92,46 @@
 
 ## 운영용 Compose 기동 예시
 
-1. 예시 환경 파일을 실제 값으로 복사/수정합니다.
+1. 예시 환경 파일을 리허설 전용 파일로 복사한 뒤 실제 값으로 수정합니다. `.env.rehearsal`은 Git에서 제외되며 실제 운영 `.env.production`과 분리됩니다.
 
 ```powershell
-Copy-Item .env.production.example .env.production
+Copy-Item .env.production.example .env.rehearsal
 ```
 
 2. 외부 MySQL 접속 정보와 운영 시크릿을 채웁니다.
-3. 운영 스택을 기동합니다.
+3. rehearsal 환경이 placeholder 없이 Compose 계약을 만족하는지 검사합니다. 이 명령은 컨테이너를 만들거나 외부 MySQL에 연결하지 않습니다.
 
 ```powershell
-docker compose --env-file .env.production -f compose.prod.yaml up -d --build
+$env:COMPOSE_REHEARSAL_ENV_FILE = ".env.rehearsal"
+pnpm rehearsal:compose:preflight
 ```
 
-4. 관측 스택까지 필요하면 `ops` profile을 함께 사용합니다.
+4. 운영 스택을 기동합니다.
 
 ```powershell
-docker compose --env-file .env.production -f compose.prod.yaml --profile ops up -d --build
+docker compose --env-file .env.rehearsal -f compose.prod.yaml up -d --build
+```
+
+5. 관측 스택까지 필요하면 `ops` profile을 함께 사용합니다.
+
+```powershell
+docker compose --env-file .env.rehearsal -f compose.prod.yaml --profile ops up -d --build
+```
+
+6. `generation-worker`는 별도 Codex canary release gate가 승인된 이후에만 기동합니다. `GENERATION_CODEX_CANARY_ATTESTATION_FILE`에는 컨테이너 `/app/ARTIFACT_DIGEST`와 일치하는 외부 발급 attestation JSON의 **호스트 경로**를 지정합니다. 기본 `ops/attestations/unapproved.json`은 의도적으로 worker 기동을 거부합니다.
+
+```powershell
+docker compose --env-file .env.rehearsal -f compose.prod.yaml --profile generation up -d --build
+```
+
+7. 프록시 경유 운영 스모크를 실행합니다. `PROD_SMOKE_ADMIN_*`를 지정하면 로그인·세션·자동화 진단도 함께 확인하고, `PROD_SMOKE_POST_SLUG`를 지정하면 공개 게시글 API와 상세 페이지도 확인합니다.
+
+```powershell
+$env:PROD_SMOKE_ENV_FILE = ".env.rehearsal"
+$env:PROD_SMOKE_BASE_URL = "http://127.0.0.1:13002" # .env.rehearsal의 PROXY_PORT 값과 일치시킵니다.
+$env:PROD_SMOKE_ADMIN_USERNAME = "rehearsal-admin"
+$env:PROD_SMOKE_ADMIN_PASSWORD = "rehearsal-only-password"
+pnpm smoke:compose
 ```
 
 ## 기동 순서
@@ -118,10 +142,10 @@ docker compose --env-file .env.production -f compose.prod.yaml --profile ops up 
    - Flyway 마이그레이션 성공
    - Quartz 기동 완료
 3. Next.js를 시작하고 공개/관리자 라우트 렌더링을 확인합니다.
-4. Spring Boot가 정상 상태가 된 뒤 generation-worker를 시작합니다.
+4. Codex canary release gate가 승인된 경우에만 Spring Boot가 정상 상태가 된 뒤 generation-worker를 시작합니다.
 5. 리버스 프록시가 same-origin 경로를 올바르게 전달하는지 확인합니다.
 
-`compose.prod.yaml`은 위 순서를 그대로 반영하도록 backend healthcheck 이후 worker와 proxy가 의존하도록 구성되어 있습니다.
+`compose.prod.yaml`은 frontend/backend healthcheck 이후 proxy가 시작되도록 구성되어 있습니다. generation-worker는 backend healthcheck 이후에만 시작되며, 미승인 상태에서는 profile 밖에 두어 기본 리허설에서 제외합니다.
 
 ## 운영 스모크 체크
 
@@ -201,6 +225,7 @@ docker compose --env-file .env.production -f compose.prod.yaml --profile ops up 
 - `pnpm exec playwright test`
 - `docker compose config`
 - `docker compose --env-file .env.production.example -f compose.prod.yaml config`
+- rehearsal 전용 비밀값을 채운 뒤 `pnpm rehearsal:compose:preflight`
 - GitHub CI와 Security 워크플로가 릴리스 후보 브랜치에서 모두 녹색
 
 ## 현재 비목표
