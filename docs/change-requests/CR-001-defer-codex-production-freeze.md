@@ -13,7 +13,8 @@ Codex SDK는 그때까지 preferred candidate이며, 운영 어댑터로 확정�
 ## 근거
 
 - Phase 0 스파이크는 Codex SDK 0.142.3에서 read-only sandbox, approval `never`, 도구 네트워크/web search 차단, 90초 abort, 구조화 출력 검증을 통과했다.
-- 현재 워크스테이션에는 외부 공급 회전형 운영 자격증명과 독립 배포 환경이 없다. 기존 로그인 세션 성공을 운영 무인 인증 증거로 간주하면 안 된다.
+- Story 22에서 현재 기본 모델 호환성을 위해 Codex SDK를 0.144.5로 갱신했고, 외부 주입 API key를 단일 process environment로 전달한 non-interactive structured-output smoke를 통과했다. 이 증거는 clean-container 격리 canary attestation이나 production adapter freeze 승인을 대체하지 않는다.
+- Phase 0 당시에는 외부 공급 회전형 운영 자격증명과 독립 배포 환경이 없었다. 현재도 secret manager로 회전·관리되는 운영 자격증명, clean-container 격리 canary, 독립 재시작 증거는 없으므로 단일 smoke 성공을 production 무인 인증 증거로 간주하면 안 된다.
 - Story 8은 durable job, lease, retry, cancellation, schema validation, credential injection과 provider substitution을 함께 구현하므로 운영 검증을 수행할 최소 실행 단위다.
 
 ## 수용 기준

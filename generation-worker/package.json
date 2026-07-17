@@ -15,7 +15,7 @@
     "start:once": "node dist/cli.js --once"
   },
   "dependencies": {
-    "@openai/codex-sdk": "0.142.3"
+    "@openai/codex-sdk": "0.144.5"
   },
   "devDependencies": {
     "@eslint/js": "9.39.4",
