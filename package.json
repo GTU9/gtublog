@@ -17,6 +17,8 @@
     "quality:node": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
     "e2e": "playwright test",
     "e2e:fullstack": "node scripts/run-fullstack-e2e.mjs",
+    "rehearsal:compose:preflight": "node scripts/run-compose-rehearsal-preflight.mjs",
+    "smoke:compose": "node scripts/run-production-compose-smoke.mjs",
     "drill:backup-restore": "node scripts/run-backup-restore-drill.mjs",
     "drill:restart-recovery": "node scripts/run-restart-recovery-drill.mjs"
   },

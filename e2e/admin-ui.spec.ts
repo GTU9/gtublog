@@ -57,6 +57,8 @@ test("administrator can manage automation configuration and see safe conflict gu
 
   const defaultSourcesPanel = page.getByLabel("자동화 소스 패널");
   const defaultSchedulesPanel = page.getByLabel("자동화 스케줄 패널");
+  await expect(defaultSourcesPanel).toBeVisible();
+  await expect(defaultSchedulesPanel).toBeVisible();
   const [sourceBox, scheduleBox] = await Promise.all([
     defaultSourcesPanel.boundingBox(),
     defaultSchedulesPanel.boundingBox(),
