@@ -4,9 +4,10 @@ on:
   pull_request:
     branches: [prototype]
   push:
-    branches: [prototype, "codex/story/**"]
+    branches: [prototype]
   schedule:
     - cron: "17 3 * * 1"
+  workflow_dispatch:
 
 permissions:
   contents: read
