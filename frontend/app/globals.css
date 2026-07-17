@@ -520,6 +520,11 @@ button {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+.admin-stats > *,
+.admin-grid > * {
+  min-width: 0;
+}
+
 .taxonomy-grid {
   grid-template-columns: repeat(2, minmax(320px, 1fr));
   align-items: start;
@@ -550,6 +555,11 @@ button {
   align-items: flex-start;
   padding-bottom: 0.85rem;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.admin-list li > :first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .admin-list li:last-child {
