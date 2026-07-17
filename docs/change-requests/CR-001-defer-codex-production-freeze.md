@@ -1,6 +1,7 @@
 # CR-001: Codex 운영 어댑터 확정 게이트를 Story 8로 이동
 
 - 상태: 승인
+- 후속 상태: Codex SDK 운영 승인 판단은 CR-002로 대체됨
 - 작성일: 2026-06-29
 - 영향 범위: Phase 0 공급자 확정 게이트, Story 8 generation-worker 구현
 

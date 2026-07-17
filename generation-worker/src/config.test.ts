@@ -95,10 +95,10 @@ describe("worker configuration", () => {
         ...requiredEnvironment,
         GENERATION_CODEX_ENV_ISOLATION_APPROVED: "false",
       }),
-    ).toThrow("production adapter is frozen");
+    ).toThrow("frozen by CR-002");
   });
 
-  it("does not allow production to override the digest baked into the image", () => {
+  it("keeps production frozen even when a legacy v1 attestation repeats the baked digest", () => {
     const directory = mkdtempSync(join(tmpdir(), "gtublog-attestation-"));
     const artifactPath = join(directory, "ARTIFACT_DIGEST");
     const attestationPath = join(directory, "attestation.json");
@@ -111,8 +111,8 @@ describe("worker configuration", () => {
       GENERATION_ARTIFACT_DIGEST_PATH: artifactPath,
     };
 
-    expect(() => loadWorkerConfig(productionEnvironment)).toThrow("matching container canary attestation");
+    expect(() => loadWorkerConfig(productionEnvironment)).toThrow("frozen by CR-002");
     writeFileSync(attestationPath, JSON.stringify({ version: 1, result: "passed", artifactDigest: "a".repeat(64) }), "utf8");
-    expect(() => loadWorkerConfig(productionEnvironment)).toThrow("matching container canary attestation");
+    expect(() => loadWorkerConfig(productionEnvironment)).toThrow("frozen by CR-002");
   });
 });

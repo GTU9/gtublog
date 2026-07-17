@@ -82,7 +82,7 @@ Versions are current planning baselines as of 2026-06-28; scaffolding must pin t
 | UI/data | Tailwind CSS, accessible source-owned component primitives, TanStack Query, React Hook Form, Zod | Keep dependencies bounded; use Client Components only where interactive. |
 | Scheduling | Spring Quartz with JDBC JobStore | Required because schedules are edited in admin UI and must survive restarts. |
 | Collection | Spring `RestClient`, ROME RSS/Atom, jsoup HTML extraction/sanitization, Resilience4j | Apply timeouts, rate limits, retry/backoff, circuit breaking, robots/terms rules. |
-| Generation integration | Versioned worker/job contract; Codex SDK provider preferred after compatibility spike; optional Codex App project automation adapter | The provider returns schema-validated drafts and can never publish directly. |
+| Generation integration | Versioned worker/job contract; Codex SDK local compatibility candidate only under CR-002; optional Codex App project automation adapter | The provider returns schema-validated drafts and can never publish directly. |
 | Observability | Actuator, Micrometer, Prometheus-format metrics, structured JSON logs, correlation IDs | Admin UI reads safe run diagnostics; sensitive values never enter logs. |
 | Backend tests | JUnit 5, Spring Boot Test, MockMvc, Testcontainers MySQL, WireMock | MySQL and Flyway are exercised in integration tests. |
 | Frontend tests | Vitest, Testing Library, MSW, Playwright, axe checks | Cover public SSR metadata and administrator flows. |
@@ -265,7 +265,7 @@ flowchart LR
 - Create canonical root `AGENTS.md`, README, `.editorconfig`, `.env.example`, and ignore rules.
 - Run a release-blocking compatibility spike before freezing dependencies: Spring Boot 4.1/Java 25/Gradle, Testcontainers, Flyway MySQL, Quartz, WireMock, jsoup/ROME, Resilience4j, Micrometer, Next/React, and the candidate Codex SDK worker runtime/sandbox/structured-output model.
 - Java 25 remains selected only if dependency resolution, unit/integration tests, container startup, and packaging pass; otherwise record the failing compatibility evidence and use Java 21 LTS.
-- Preserve the provider-neutral job schema in Phase 0 and record Codex SDK as the preferred conditional adapter candidate only. The final production adapter freeze moves to Story 8's first gate, where unattended authentication, lifecycle, sandbox, and deployment constraints must pass before production use.
+- Preserve the provider-neutral job schema in Phase 0 and record Codex SDK only as a local compatibility candidate. CR-002 blocks its production adapter until agent-phase credential separation and independently signed clean-container evidence are implemented; any alternate adapter must preserve the same contract.
 - Scaffold `backend`, `frontend`, a provider-neutral `generation-worker`, `contracts`, and `e2e` with pinned toolchains and lockfiles.
 - Add `compose.yaml` for MySQL 8.4 and local observability dependencies; secrets are placeholders only.
 - Gate: compatibility matrix and generation-provider decision record exist, the Story 8 production-adapter freeze gate is recorded explicitly, and a clean checkout can run backend/frontend/worker checks with documented commands.
@@ -313,7 +313,7 @@ flowchart LR
 ### Phase 7 — Generation worker and Codex automation contract
 
 - Define versioned job/output JSON schemas and a least-privilege claim/lease/submit protocol.
-- Implement the provider adapter behind the Phase 0 approved provider-neutral boundary. Codex SDK remains the preferred conditional candidate until Story 8's production-adapter gate approves unattended operation; if it passes, use the TypeScript SDK worker with strict structured output, time/resource budgets, prompt versioning, redaction, lease renewal, and failure reporting.
+- Implement the provider adapter behind the Phase 0 approved provider-neutral boundary. Codex SDK remains a local compatibility candidate only and is blocked for production by CR-002; a future provider must satisfy the signed independent verification and credential-boundary gate without changing Spring publication controls.
 - Add an optional project-local Codex App automation/skill that invokes the same worker contract; document the machine/app-running limitation.
 - Gate: fake-provider contract tests and a sandboxed approved-provider smoke run submit a draft without DB/publish credentials; provider substitution does not change Spring publication rules.
 
@@ -425,7 +425,7 @@ docker compose config
 
 ### Decision
 
-Use a Spring Boot 4.1 modular monolith as the sole domain/persistence authority, a Next.js React application for public/admin UX, MySQL 8.4 LTS, and a separately permissioned provider-neutral generation worker communicating through versioned durable jobs. Codex SDK is the preferred conditional provider candidate after the Phase 0 compatibility gate approves local SDK/runtime feasibility; production freeze moves to Story 8's unattended deployment/authentication gate.
+Use a Spring Boot 4.1 modular monolith as the sole domain/persistence authority, a Next.js React application for public/admin UX, MySQL 8.4 LTS, and a separately permissioned provider-neutral generation worker communicating through versioned durable jobs. Codex SDK remains a local compatibility candidate after the Phase 0 gate, but CR-002 blocks it as a production adapter until its credential boundary and independent verification are redesigned.
 
 ### Drivers
 
@@ -452,7 +452,7 @@ It keeps transactions and authorization cohesive, provides public rendering feat
 
 ### Follow-ups
 
-- Verify local Codex SDK runtime, sandbox, and structured-output constraints during the Phase 0 release-blocking spike; then verify unattended deployment/authentication constraints as Story 8's first production-adapter gate. If production use is unsupported there, preserve the job contract and substitute an approved provider without changing publication controls.
+- Verify local Codex SDK runtime, sandbox, and structured-output constraints during the Phase 0 release-blocking spike. For production, preserve the job contract and select an approved provider only after the CR-002 credential-boundary and independent-verification gate is met.
 - Benchmark Java 25 and all selected libraries; use Java 21 only with recorded incompatibility.
 - Record source-policy and retention decisions before enabling unattended production schedules.
 
