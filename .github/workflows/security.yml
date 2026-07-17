@@ -41,6 +41,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
+          cache: false
           scanners: vuln
           severity: HIGH,CRITICAL
           ignore-unfixed: true
@@ -77,6 +78,7 @@ jobs:
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
         with:
           image-ref: gtublog-generation-worker:scan
+          cache: false
           format: table
           severity: HIGH,CRITICAL
           ignore-unfixed: true
