@@ -1,5 +1,4 @@
 import { hostname } from "node:os";
-import { readFileSync } from "node:fs";
 
 export interface WorkerConfig {
   readonly backendBaseUrl: string;
@@ -34,7 +33,7 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
   const provider = env.GENERATION_PROVIDER === "fake" && env.NODE_ENV === "test" ? "fake-provider" : "codex-sdk";
   const isolationApproved = env.NODE_ENV === "test"
     ? env.GENERATION_CODEX_ENV_ISOLATION_APPROVED === "true"
-    : validCanaryAttestation(env.GENERATION_CODEX_CANARY_ATTESTATION_PATH, "/app/ARTIFACT_DIGEST");
+    : validCanaryAttestation();
   const config: WorkerConfig = {
     backendBaseUrl: required("GENERATION_BACKEND_BASE_URL").replace(/\/$/u, ""),
     workerToken: required("GENERATION_WORKER_TOKEN"),
@@ -54,17 +53,14 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
   if (config.errorBackoffMaxMs < config.errorBackoffMinMs) throw new Error("Error backoff maximum must be at least its minimum.");
   if (config.leaseSafetyMarginMs <= config.heartbeatIntervalMs) throw new Error("GENERATION_LEASE_SAFETY_MARGIN_MS must be greater than GENERATION_HEARTBEAT_INTERVAL_MS.");
   if (provider === "codex-sdk" && !config.codexEnvIsolationApproved) {
-    throw new Error("Codex production adapter is frozen until a matching container canary attestation is mounted.");
+    throw new Error("Codex production adapter is frozen by CR-002 until signed attestation and credential-boundary support are implemented.");
   }
   return config;
 }
 
-function validCanaryAttestation(path: string | undefined, artifactDigestPath: string): boolean {
-  if (!path?.trim()) return false;
-  try {
-    const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-    const artifactDigest = readFileSync(artifactDigestPath, "utf8").trim();
-    return /^[0-9a-f]{64}$/u.test(artifactDigest)
-      && value.version === 1 && value.result === "passed" && value.artifactDigest === artifactDigest;
-  } catch { return false; }
+function validCanaryAttestation(): boolean {
+  // v1 only proves that a host-mounted JSON repeats the image digest. It has no
+  // independent issuer, signature, freshness, or restart-probe evidence, so it
+  // must never release the production Codex adapter (CR-002).
+  return false;
 }

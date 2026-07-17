@@ -50,7 +50,7 @@ This test plan proves the twelve product and security acceptance criteria under 
 - Invalid HTML, unsafe URLs, scripts, and unsupported fields are rejected/sanitized.
 - Worker service credential cannot access admin/publication or database surfaces.
 - The provider adapter can be replaced by a fake/alternate provider without changing the versioned job schema or Spring publication decision tests.
-- Story 8's production-adapter gate must prove unattended authentication with externally supplied rotatable credentials, restartable deployment without a Codex App session, and deterministic timeout/cancellation/lease/retry behavior before Codex SDK production freeze.
+- production-adapter gate must prove agent-phase credential separation, unattended authentication with externally supplied rotatable credentials, restartable deployment without a Codex App session, deterministic timeout/cancellation/lease/retry behavior, and two independent clean-container restart probes. An artifact digest JSON alone is insufficient: an independent verifier must validate fresh raw evidence and issue a signed attestation. Until this exists, the Codex SDK production adapter remains frozen under CR-002.
 
 ### Publication outbox and cache recovery
 
