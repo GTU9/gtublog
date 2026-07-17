@@ -7,8 +7,7 @@ on:
   push:
     branches:
       - prototype
-      - story/**
-      - codex/story/**
+  workflow_dispatch:
 
 permissions:
   contents: read
