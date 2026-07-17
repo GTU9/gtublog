@@ -423,6 +423,6 @@ docker compose config
 
 ## 다음 우선순위
 
-- 운영 compose 기반 실배포 리허설과 이미지 빌드 검증
-- 자동화 UX 한국어 품질 보강과 진단 가독성 개선
-- 배포 환경 기준 smoke test / 복구 테스트 자동화 보강
+- 운영 복구 drill을 CI 릴리스 게이트로 실행하고 산출물을 보존
+- 외부 승인된 무인 Codex 자격증명과 격리 canary attestation으로 production adapter gate 검증
+- 실제 운영 환경의 DNS/TLS 및 배포 플랫폼별 인수 테스트
