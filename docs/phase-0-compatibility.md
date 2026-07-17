@@ -12,7 +12,7 @@
 | Next.js / React | 16.2.9 / 19.2.7 | lint, route type 생성, TypeScript check, Vitest, production Turbopack build가 Node 24에서 통과했습니다. 최신 Next.js는 더 이상 `next lint`를 기본 제공하지 않으므로 lint는 ESLint 직접 실행 방식을 사용합니다. | 선택한 major/minor 범위 안에서 patch release만 갱신합니다. |
 | MySQL | 8.4.10 LTS | Testcontainers가 pinned 공식 multi-platform digest를 시작했고, MySQL 8.4를 확인했으며, Flyway compatibility migration을 skip/failure 없이 적용했습니다. 같은 Compose 서비스는 기존 로컬 MySQL 8.0 서비스가 3306을 사용 중이어서 host port 3307에서 `healthy`가 되었습니다. | MySQL 8.4.10과 digest pin을 유지합니다. Story 2에서 production domain migration과 concurrency coverage를 추가합니다. |
 | Docker Compose | Docker Desktop 4.79.0 / Engine 29.5.3 / Compose v5.1.4 | `docker compose config`가 통과했고 MySQL 서비스가 `healthy` 상태가 되었으며, 이후 test container/network를 named volume 삭제 없이 정리했습니다. | Windows 개발 기준선은 Docker Desktop으로 유지합니다. 별도 설치된 MySQL 8.0 서비스가 3306을 사용 중일 때는 `MYSQL_PORT=3307`을 사용합니다. |
-| Generation provider | provider-neutral boundary 뒤의 `@openai/codex-sdk` 0.142.3 선호 후보 | 로컬 authenticated-session spike가 Node 24, read-only sandboxing, approval `never`, tool network와 web search 비활성화, 90초 abort signal, schema-constrained output 조건에서 통과했습니다. 다만 외부 unattended production credential이나 재시작 가능한 배포 환경은 없었습니다. | Codex SDK는 조건부 선호 후보로만 유지합니다. production adapter freeze는 Story 8의 첫 번째 게이트로 넘기고, 실패 시 계약을 약화시키지 않는 대체 adapter를 Change Request로 선택해야 합니다. |
+| Generation provider | provider-neutral boundary 뒤의 `@openai/codex-sdk` 0.144.5 선호 후보 | Node 24에서 read-only sandboxing, approval `never`, tool network와 web search 비활성화, 90초 abort signal, schema-constrained output 조건을 유지했습니다. 2026-07-17에 외부 주입 API key를 단일 process environment로만 전달한 non-interactive structured-output smoke가 통과했습니다. 다만 clean-container 격리 canary attestation과 두 번의 독립 재시작 증거는 아직 없습니다. | Codex SDK는 조건부 선호 후보로만 유지합니다. production adapter freeze는 matching clean-container canary attestation 전까지 유지하며, 실패 시 계약을 약화시키지 않는 대체 adapter를 Change Request로 선택해야 합니다. |
 
 ## Backend dependency spike
 
@@ -22,7 +22,7 @@ Java 25와 Docker가 준비된 뒤에는 `backend\gradlew.bat dependencies`와 `
 
 ## Codex 가능성 판단
 
-공식 Codex SDK 문서는 `@openai/codex-sdk`를 server-side Node.js 18+ 애플리케이션용으로 제공하며 programmatic run을 지원합니다. 선택한 Node 24 런타임은 이 최소 요구사항을 충족합니다. pinned 0.142.3 SDK는 로컬 실행 가능성 spike를 통과했고, production adapter freeze는 의도적으로 Story 8로 연기했습니다.
+공식 Codex SDK 문서는 `@openai/codex-sdk`를 server-side Node.js 18+ 애플리케이션용으로 제공하며 programmatic run을 지원합니다. 선택한 Node 24 런타임은 이 최소 요구사항을 충족합니다. pinned 0.144.5 SDK는 현재 기본 모델과의 non-interactive structured-output smoke를 통과했고, production adapter freeze는 clean-container canary attestation이 나올 때까지 유지합니다.
 
 - SDK 의존성은 `generation-worker` 안에 격리된 선호 후보로 남깁니다.
 - spike는 non-interactive execution, read-only sandboxing, approval denial, tool network / web search 비활성화, bounded cancellation, output-schema enforcement를 입증했습니다.
