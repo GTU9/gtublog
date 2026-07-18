@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { createCodexGenerationProvider } from "./codex-provider.js";
 import { createFakeGenerationProvider } from "./fake-provider.js";
+import { createOpenAIResponsesGenerationProvider } from "./openai-responses-provider.js";
 import { loadWorkerConfig } from "./config.js";
 import { createWorkerHealthState } from "./health.js";
 import { exitCodeForError } from "./exit-code.js";
@@ -18,11 +19,16 @@ async function main(): Promise<number> {
   const health = createWorkerHealthState(new Date(), process.env.GENERATION_HEALTH_FILE);
   process.once("SIGINT", () => { health.beginShutdown(); shutdown.abort(new Error("SIGINT")); });
   process.once("SIGTERM", () => { health.beginShutdown(); shutdown.abort(new Error("SIGTERM")); });
-  const isolatedRoot = await mkdtemp(join(tmpdir(), "gtublog-worker-"));
-  const providerEnv = isolatedEnvironment(isolatedRoot, config.codexApiKey);
+  const isolatedRoot = config.provider === "codex-sdk" ? await mkdtemp(join(tmpdir(), "gtublog-worker-")) : undefined;
   const provider = config.provider === "fake-provider"
     ? createFakeGenerationProvider()
-    : createCodexGenerationProvider({ workingDirectory: isolatedRoot, apiKey: config.codexApiKey, env: providerEnv });
+    : config.provider === "openai-responses"
+      ? createOpenAIResponsesGenerationProvider({ apiKey: config.openaiApiKey, model: config.openaiResponsesModel })
+      : createCodexGenerationProvider({
+        workingDirectory: isolatedRoot!,
+        apiKey: config.codexApiKey,
+        env: isolatedEnvironment(isolatedRoot!, config.codexApiKey),
+      });
   const client = createBackendGenerationClient({
     baseUrl: config.backendBaseUrl,
     token: config.workerToken,
@@ -60,7 +66,7 @@ async function main(): Promise<number> {
     }
     return 4;
   } finally {
-    await rm(isolatedRoot, { recursive: true, force: true });
+    if (isolatedRoot) await rm(isolatedRoot, { recursive: true, force: true });
     lifecycle("worker_stopped", { workerId: config.workerId });
   }
 }

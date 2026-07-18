@@ -26,6 +26,8 @@ The runnable-worker gate must implement and verify all of the following before p
 
 Phase 0 is not blocked by the missing unattended authentication and deployment probe. A future production adapter must pass the stronger CR-002 gate: agent-phase credential separation, two fresh clean-container restart probes, and an independent verifier's signed attestation. Any substitute changes only the adapter behind the same contract; it must not weaken Spring publication gates or move scheduling authority into Codex App automation.
 
+CR-003 adds an explicitly selected, tool-free OpenAI Responses adapter as that substitute. It directly calls the Responses API with tools disabled and strict structured output; it does not start a Codex CLI process. The backend `AUTOMATION_WORKER_PROVIDER` and worker `GENERATION_PROVIDER` must both select `openai-responses`, otherwise the worker cannot claim a compatible job. This preserves the CR-002 freeze for the Codex SDK path and does not itself authorize production deployment or automatic publication.
+
 ## Consequences
 
 - Codex App automation may be an optional operator convenience, never the scheduler of record.

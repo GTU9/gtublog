@@ -14,6 +14,13 @@ const requiredEnvironment = {
   GENERATION_CODEX_ENV_ISOLATION_APPROVED: "true",
 } satisfies NodeJS.ProcessEnv;
 
+const openAiEnvironment = {
+  ...requiredEnvironment,
+  GENERATION_PROVIDER: "openai-responses",
+  OPENAI_API_KEY: "openai-secret-value",
+  GENERATION_OPENAI_RESPONSES_MODEL: "gpt-test-model",
+} satisfies NodeJS.ProcessEnv;
+
 describe("worker configuration", () => {
   it("loads required values, strips a trailing base URL slash, and applies bounded defaults", () => {
     const config = loadWorkerConfig(requiredEnvironment);
@@ -97,6 +104,45 @@ describe("worker configuration", () => {
       }),
     ).toThrow("frozen by CR-002");
   });
+
+  it("selects the tool-free OpenAI Responses provider only when explicitly configured", () => {
+    const config = loadWorkerConfig(openAiEnvironment);
+
+    expect(config).toMatchObject({
+      provider: "openai-responses",
+      openaiApiKey: "openai-secret-value",
+      openaiResponsesModel: "gpt-test-model",
+      codexApiKey: "",
+    });
+  });
+
+  it("allows the explicitly selected fake provider for local and disposable recovery runs", () => {
+    const config = loadWorkerConfig({
+      ...requiredEnvironment,
+      NODE_ENV: "development",
+      GENERATION_PROVIDER: "fake",
+      CODEX_API_KEY: "",
+    });
+
+    expect(config.provider).toBe("fake-provider");
+  });
+
+  it.each(["OPENAI_API_KEY", "GENERATION_OPENAI_RESPONSES_MODEL"])(
+    "rejects missing OpenAI Responses configuration without exposing secrets: %s",
+    (missingName) => {
+      const environment: NodeJS.ProcessEnv = { ...openAiEnvironment };
+      delete environment[missingName];
+
+      expect(() => loadWorkerConfig(environment)).toThrow(missingName);
+      try {
+        loadWorkerConfig(environment);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        expect(message).not.toContain("openai-secret-value");
+        expect(message).not.toContain("worker-secret-value");
+      }
+    },
+  );
 
   it("keeps production frozen even when a legacy v1 attestation repeats the baked digest", () => {
     const directory = mkdtempSync(join(tmpdir(), "gtublog-attestation-"));

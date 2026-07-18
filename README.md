@@ -382,6 +382,13 @@ docker compose config
 
 ## 운영 및 보안 메모
 
+### 생성 provider 선택
+
+- 기본 `GENERATION_PROVIDER=codex-sdk` 경로는 CR-002에 따라 fail-closed 상태입니다.
+- OpenAI Responses 경로는 `GENERATION_PROVIDER=openai-responses`, `OPENAI_API_KEY`, `GENERATION_OPENAI_RESPONSES_MODEL`을 모두 외부 환경 변수로 명시했을 때만 선택됩니다.
+- 이 경로는 Codex CLI나 에이전트 도구를 시작하지 않고 `tools: []`, `tool_choice: "none"`, strict JSON Schema로 초안을 요청합니다. 키와 provider 원문 응답은 저장하거나 로그에 남기지 않습니다.
+- 실제 운영 활성화와 live API smoke는 별도 배포 story의 승인·검증 대상입니다.
+
 - 브라우저와 백엔드는 production에서 same-origin 기준으로 동작하도록 설계됩니다.
 - Spring Boot가 인증, 권한, 발행, 자동화 상태의 최종 권한을 가집니다.
 - generation-worker는 비신뢰 경계이며 데이터베이스 직접 접근 권한이나 직접 발행 권한을 가지지 않습니다.

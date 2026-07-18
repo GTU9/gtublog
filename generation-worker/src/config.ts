@@ -4,8 +4,10 @@ export interface WorkerConfig {
   readonly backendBaseUrl: string;
   readonly workerToken: string;
   readonly workerId: string;
-  readonly provider: "codex-sdk" | "fake-provider";
+  readonly provider: "codex-sdk" | "openai-responses" | "fake-provider";
   readonly codexApiKey: string;
+  readonly openaiApiKey: string;
+  readonly openaiResponsesModel: string;
   readonly codexEnvIsolationApproved: boolean;
   readonly pollIntervalMs: number;
   readonly errorBackoffMinMs: number;
@@ -30,7 +32,11 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     if (!Number.isSafeInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer.`);
     return value;
   };
-  const provider = env.GENERATION_PROVIDER === "fake" && env.NODE_ENV === "test" ? "fake-provider" : "codex-sdk";
+  const provider = env.GENERATION_PROVIDER === "fake"
+    ? "fake-provider"
+    : env.GENERATION_PROVIDER === "openai-responses"
+      ? "openai-responses"
+      : "codex-sdk";
   const isolationApproved = env.NODE_ENV === "test"
     ? env.GENERATION_CODEX_ENV_ISOLATION_APPROVED === "true"
     : validCanaryAttestation();
@@ -40,6 +46,8 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     workerId: env.GENERATION_WORKER_ID?.trim() || `${hostname()}-${process.pid.toString()}`,
     provider,
     codexApiKey: provider === "codex-sdk" ? required("CODEX_API_KEY") : "",
+    openaiApiKey: provider === "openai-responses" ? required("OPENAI_API_KEY") : "",
+    openaiResponsesModel: provider === "openai-responses" ? required("GENERATION_OPENAI_RESPONSES_MODEL") : "",
     codexEnvIsolationApproved: isolationApproved,
     pollIntervalMs: duration("GENERATION_POLL_INTERVAL_MS", 5_000),
     errorBackoffMinMs: duration("GENERATION_ERROR_BACKOFF_MIN_MS", 1_000),

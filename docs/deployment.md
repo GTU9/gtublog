@@ -118,7 +118,9 @@ docker compose --env-file .env.rehearsal -f compose.prod.yaml up -d --build
 docker compose --env-file .env.rehearsal -f compose.prod.yaml --profile ops up -d --build
 ```
 
-6. `generation-worker`는 별도 Codex canary release gate가 승인된 이후에만 기동합니다. `GENERATION_CODEX_CANARY_ATTESTATION_FILE`에는 컨테이너 `/app/ARTIFACT_DIGEST`와 일치하는 외부 발급 attestation JSON의 **호스트 경로**를 지정합니다. 기본 `ops/attestations/unapproved.json`은 의도적으로 worker 기동을 거부합니다.
+6. `GENERATION_PROVIDER=codex-sdk`인 경우에만 별도 Codex canary release gate가 승인된 이후 worker를 기동합니다. `GENERATION_CODEX_CANARY_ATTESTATION_FILE`에는 컨테이너 `/app/ARTIFACT_DIGEST`와 일치하는 외부 발급 attestation JSON의 **호스트 경로**를 지정합니다. 기본 `ops/attestations/unapproved.json`은 의도적으로 Codex worker 기동을 거부합니다.
+
+   `GENERATION_PROVIDER=openai-responses`는 CR-003의 도구 미사용 직접 API 경로입니다. `OPENAI_API_KEY`와 `GENERATION_OPENAI_RESPONSES_MODEL`을 외부 secret source로 주입해야 하며, `.env` 예시나 로그에 실제 값을 기록하지 않습니다. 이 변경만으로 production API 호출이 승인되는 것은 아니며, 별도 deployment smoke 절차를 완료해야 합니다.
 
 ```powershell
 docker compose --env-file .env.rehearsal -f compose.prod.yaml --profile generation up -d --build
@@ -142,7 +144,7 @@ pnpm smoke:compose
    - Flyway 마이그레이션 성공
    - Quartz 기동 완료
 3. Next.js를 시작하고 공개/관리자 라우트 렌더링을 확인합니다.
-4. Codex canary release gate가 승인된 경우에만 Spring Boot가 정상 상태가 된 뒤 generation-worker를 시작합니다.
+4. 선택한 provider의 release gate를 확인한 뒤 Spring Boot가 정상 상태가 되면 generation-worker를 시작합니다. Codex SDK에는 CR-002 canary gate를 적용하고, OpenAI Responses에는 CR-003 환경 변수·secret 경계를 적용합니다.
 5. 리버스 프록시가 same-origin 경로를 올바르게 전달하는지 확인합니다.
 
 `compose.prod.yaml`은 frontend/backend healthcheck 이후 proxy가 시작되도록 구성되어 있습니다. generation-worker는 backend healthcheck 이후에만 시작되며, 미승인 상태에서는 profile 밖에 두어 기본 리허설에서 제외합니다.
