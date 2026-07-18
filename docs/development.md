@@ -42,6 +42,10 @@ Docker가 사용 가능한 상태에서 `pnpm e2e:fullstack`를 실행합니다.
 
 ## Generation worker
 
+### OpenAI Responses 로컬 선택 경로
+
+기본 로컬 검증은 `GENERATION_PROVIDER=fake`와 `AUTOMATION_WORKER_PROVIDER=fake-provider`를 유지합니다. 도구 미사용 Responses 경로를 설정만 검증하려면 backend와 worker를 함께 `openai-responses`로 맞추고, ignored local 환경 파일에서만 `OPENAI_API_KEY`와 `GENERATION_OPENAI_RESPONSES_MODEL`을 제공합니다. 실제 키 호출은 이 문서의 로컬 기본 절차에 포함되지 않습니다.
+
 `.env.example`의 generation 관련 변수를 채운 뒤 worker를 빌드하고 `pnpm --dir generation-worker start:once`로 단일 claim을 실행할 수 있습니다. 종료 코드는 다음 의미를 갖습니다.
 
 - `0`: 작업 없음 또는 성공

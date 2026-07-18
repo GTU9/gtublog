@@ -15,6 +15,7 @@ import {
 import type { GenerationProvider } from "./provider.js";
 import { terminalPayloadDigest } from "./terminal.js";
 import { createWorkerHealthState } from "./health.js";
+import { createOpenAIResponsesGenerationProvider } from "./openai-responses-provider.js";
 
 function claimResponse(): GenerationClaimResponse {
   return {
@@ -209,6 +210,50 @@ describe("v2 backend client error policy", () => {
 });
 
 describe("v2 runtime terminal safety", () => {
+  it("claims, generates, and submits through the OpenAI Responses provider contract", async () => {
+    const responsesFetch = vi.fn<typeof fetch>().mockResolvedValue(Response.json({
+      status: "completed",
+      output: [{ type: "message", content: [{ type: "output_text", text: JSON.stringify({
+        title: "Draft",
+        excerpt: "Summary",
+        contentMarkdown: "# Draft",
+        citationSnapshotIds: [1],
+      }) }] }],
+    }));
+    const provider = createOpenAIResponsesGenerationProvider({
+      apiKey: "openai-api-key-canary",
+      model: "gpt-test-model",
+      fetchImplementation: responsesFetch,
+    });
+    const submitted: GenerationSubmitRequest[] = [];
+    let claimedRequest: Parameters<BackendGenerationClient["claim"]>[0] | undefined;
+    const client: BackendGenerationClient = {
+      claim: (request) => {
+        claimedRequest = request;
+        return Promise.resolve({ ...claimResponse(), providerName: "openai-responses" });
+      },
+      heartbeat: () => Promise.resolve({
+        jobId: 13,
+        status: "CLAIMED",
+        serverTime: "2026-06-30T12:00:30Z",
+        leaseExpiresAt: "2026-06-30T12:10:00Z",
+      }),
+      submit: (_jobId, terminal) => {
+        submitted.push(terminal);
+        return Promise.resolve(submitResponse(terminal));
+      },
+    };
+
+    await expect(createWorkerRuntime({ client, provider, heartbeatIntervalMs: 60_000 }).runOnce("worker-a"))
+      .resolves.toMatchObject({ providerName: "openai-responses" });
+
+    expect(claimedRequest).toMatchObject({ supportedProviders: ["openai-responses"] });
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0]?.providerName).toBe("openai-responses");
+    expect(submitted[0]?.draft).toMatchObject({ title: "Draft" });
+    expect(JSON.stringify(responsesFetch.mock.calls)).not.toContain("worker-token-canary");
+  });
+
   it("retries a response-lost success with the exact same terminal payload", async () => {
     const submissions: GenerationSubmitRequest[] = [];
     const submit = vi.fn((_jobId: number, request: GenerationSubmitRequest) => {

@@ -7,6 +7,7 @@ export type {
 export { createGenerationWorker } from "./provider.js";
 export { createFakeGenerationProvider } from "./fake-provider.js";
 export { createCodexGenerationProvider } from "./codex-provider.js";
+export { createOpenAIResponsesGenerationProvider } from "./openai-responses-provider.js";
 export { loadWorkerConfig, type WorkerConfig } from "./config.js";
 export { createWorkerHealthState, type WorkerHealthSnapshot, type WorkerHealthState } from "./health.js";
 export { exitCodeForError, type WorkerFailureExitCode } from "./exit-code.js";
