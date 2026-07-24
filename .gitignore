@@ -23,6 +23,7 @@ out/
 # Node / Next.js / Playwright
 node_modules/
 .next/
+frontend/next-env.d.ts
 **/dist/
 coverage/
 playwright-report/
