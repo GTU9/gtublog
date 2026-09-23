@@ -35,3 +35,14 @@
 - 독립 content API MySQL 테스트 9개도 통과했다.
 
 남은 Story23 차단 조건은 없다. 자동화 전반의 후속 미구현 범위는 다음 스토리에서 별도 다룬다.
+
+## PR 보안 검사 후 추가 검증
+
+PR #75의 첫 보안 CI에서 기존 `next@16.2.11` 및 고정 하위 의존성의 공개 취약점으로 `pnpm audit --prod`가 실패했다. 공식 Next 보안 릴리스 권고에 따라 `next`와 `eslint-config-next`를 16.3.6으로 맞추고, PostCSS·Sharp·nanoid·Browserslist·baseline-browser-mapping을 수정 버전으로 고정했다. 버전이 최근에 발표된 Next 패키지에만 정확한 버전 단위의 release-age 예외를 적용했다.
+
+- `pnpm install --frozen-lockfile` 통과.
+- `pnpm audit --prod --audit-level moderate` 통과: 중간·높음·치명적 0건.
+- 패치 후 프런트 lint/typecheck/29개 테스트/build, 워커 lint/typecheck/76개 테스트/build 통과.
+- 패치 후 일반 Playwright 8/8 통과. Windows에서 테스트 완료 뒤 개발 서버 종료가 지연돼 해당 실행의 서버 프로세스만 정리했고 Playwright 종료코드 0을 확인했다.
+- 패치 후 임시 MySQL·실제 Spring·프로덕션 Next 풀스택 Playwright 1/1 통과 (종료코드 0, 임시 DB 컨테이너 정리).
+- 의존성 diff의 독립 코드 리뷰 APPROVE, 발견 문제 0건.
