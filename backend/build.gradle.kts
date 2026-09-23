@@ -1,8 +1,11 @@
 plugins {
     java
-    id("org.springframework.boot") version "4.1.0"
+    id("org.springframework.boot") version "4.1.1"
     id("io.spring.dependency-management") version "1.1.7"
 }
+
+// Spring Boot 4.1.1 still manages a Tomcat release affected by 2026 security advisories.
+extra["tomcat.version"] = "11.0.26"
 
 group = "com.gtublog"
 version = "0.1.0-SNAPSHOT"

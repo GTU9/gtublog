@@ -46,3 +46,8 @@ PR #75의 첫 보안 CI에서 기존 `next@16.2.11` 및 고정 하위 의존성�
 - 패치 후 일반 Playwright 8/8 통과. Windows에서 테스트 완료 뒤 개발 서버 종료가 지연돼 해당 실행의 서버 프로세스만 정리했고 Playwright 종료코드 0을 확인했다.
 - 패치 후 임시 MySQL·실제 Spring·프로덕션 Next 풀스택 Playwright 1/1 통과 (종료코드 0, 임시 DB 컨테이너 정리).
 - 의존성 diff의 독립 코드 리뷰 APPROVE, 발견 문제 0건.
+
+다음 CI의 Trivy는 기존 잠금 파일의 Tomcat 11.0.22 치명적 취약점 3건과 기존 워커 이미지의 OpenSSL 3.5.7-r0 높은 위험 취약점 2건을 추가 탐지했다. Spring Boot 4.1.1로 올리고 `tomcat.version`을 11.0.26으로 지정해 Tomcat core/el/websocket 잠금 값을 모두 일치시켰다. 워커 Dockerfile의 두 단계는 Node 24/Alpine 3.24의 동일한 새 다이제스트로 고정했다. 실제 빌드한 이미지의 `libcrypto3`/`libssl3`가 모두 수정 버전 3.5.8-r0임을 확인했다.
+
+- 보안 패치 후 `backend\gradlew.bat check --no-configuration-cache` 전체 통과 (`BUILD SUCCESSFUL in 2m 42s`, MySQL 통합 테스트 포함).
+- 새 워커 컨테이너 이미지 빌드 통과. 이미지 내부 `libcrypto3`/`libssl3` 모두 3.5.8-r0.
