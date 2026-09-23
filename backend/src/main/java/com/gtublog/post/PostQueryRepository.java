@@ -67,7 +67,8 @@ class PostQueryRepository {
                 postId);
     }
 
-    List<PostSummaryProjection> searchPublished(String query, int limit, int offset) {
+    List<PostSummaryProjection> searchPublished(String query, int limit, long offset) {
+        var taxonomyQuery = taxonomyLikeQuery(query);
         return jdbcTemplate.query(
                 """
                 SELECT p.id, p.slug, p.title, p.excerpt, p.status, p.first_published_at,
@@ -76,30 +77,63 @@ class PostQueryRepository {
                 LEFT JOIN post_view_counter v ON v.post_id = p.id
                 WHERE p.status = 'PUBLISHED'
                   AND p.deleted_at IS NULL
-                  AND MATCH(p.title, p.excerpt, p.content_markdown) AGAINST (? IN NATURAL LANGUAGE MODE)
+                  AND (
+                      MATCH(p.title, p.excerpt, p.content_markdown) AGAINST (? IN NATURAL LANGUAGE MODE)
+                      OR EXISTS (
+                          SELECT 1
+                          FROM post_category pc
+                          JOIN category c ON c.id = pc.category_id
+                          WHERE pc.post_id = p.id AND LOWER(c.name) LIKE ? ESCAPE '!'
+                      )
+                      OR EXISTS (
+                          SELECT 1
+                          FROM post_tag pt
+                          JOIN tag t ON t.id = pt.tag_id
+                          WHERE pt.post_id = p.id AND LOWER(t.name) LIKE ? ESCAPE '!'
+                      )
+                  )
                 ORDER BY p.first_published_at DESC, p.id DESC
                 LIMIT ? OFFSET ?
                 """,
                 (rs, rowNum) -> mapProjection(rs),
                 query,
+                taxonomyQuery,
+                taxonomyQuery,
                 limit,
                 offset);
     }
 
     long countSearchPublished(String query) {
+        var taxonomyQuery = taxonomyLikeQuery(query);
         return jdbcTemplate.queryForObject(
                 """
                 SELECT COUNT(*)
                 FROM post p
                 WHERE p.status = 'PUBLISHED'
                   AND p.deleted_at IS NULL
-                  AND MATCH(p.title, p.excerpt, p.content_markdown) AGAINST (? IN NATURAL LANGUAGE MODE)
+                  AND (
+                      MATCH(p.title, p.excerpt, p.content_markdown) AGAINST (? IN NATURAL LANGUAGE MODE)
+                      OR EXISTS (
+                          SELECT 1
+                          FROM post_category pc
+                          JOIN category c ON c.id = pc.category_id
+                          WHERE pc.post_id = p.id AND LOWER(c.name) LIKE ? ESCAPE '!'
+                      )
+                      OR EXISTS (
+                          SELECT 1
+                          FROM post_tag pt
+                          JOIN tag t ON t.id = pt.tag_id
+                          WHERE pt.post_id = p.id AND LOWER(t.name) LIKE ? ESCAPE '!'
+                      )
+                  )
                 """,
                 Long.class,
-                query);
+                query,
+                taxonomyQuery,
+                taxonomyQuery);
     }
 
-    List<PostSummaryProjection> findPublishedByCategory(String slug, int limit, int offset) {
+    List<PostSummaryProjection> findPublishedByCategory(String slug, int limit, long offset) {
         return jdbcTemplate.query(
                 """
                 SELECT p.id, p.slug, p.title, p.excerpt, p.status, p.first_published_at,
@@ -131,7 +165,7 @@ class PostQueryRepository {
                 slug);
     }
 
-    List<PostSummaryProjection> findPublishedByTag(String slug, int limit, int offset) {
+    List<PostSummaryProjection> findPublishedByTag(String slug, int limit, long offset) {
         return jdbcTemplate.query(
                 """
                 SELECT p.id, p.slug, p.title, p.excerpt, p.status, p.first_published_at,
@@ -189,6 +223,89 @@ class PostQueryRepository {
                 limit);
     }
 
+    List<PostSummaryProjection> findPublishedInUtcMonth(LocalDateTime startInclusive, LocalDateTime endExclusive, int limit, long offset) {
+        return jdbcTemplate.query(
+                """
+                SELECT p.id, p.slug, p.title, p.excerpt, p.status, p.first_published_at,
+                       COALESCE(v.view_count, 0) AS view_count
+                FROM post p
+                LEFT JOIN post_view_counter v ON v.post_id = p.id
+                WHERE p.status = 'PUBLISHED'
+                  AND p.deleted_at IS NULL
+                  AND p.first_published_at >= ?
+                  AND p.first_published_at < ?
+                ORDER BY p.first_published_at DESC, p.id DESC
+                LIMIT ? OFFSET ?
+                """,
+                (rs, rowNum) -> mapProjection(rs),
+                startInclusive,
+                endExclusive,
+                limit,
+                offset);
+    }
+
+    long countPublishedInUtcMonth(LocalDateTime startInclusive, LocalDateTime endExclusive) {
+        return jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM post p
+                WHERE p.status = 'PUBLISHED'
+                  AND p.deleted_at IS NULL
+                  AND p.first_published_at >= ?
+                  AND p.first_published_at < ?
+                """,
+                Long.class,
+                startInclusive,
+                endExclusive);
+    }
+
+    PostStatsResponse postStats() {
+        return jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*) AS total_count,
+                       SUM(CASE WHEN status = 'PUBLISHED' AND deleted_at IS NULL THEN 1 ELSE 0 END) AS published_count,
+                       SUM(CASE WHEN status = 'DRAFT' AND deleted_at IS NULL THEN 1 ELSE 0 END) AS draft_count,
+                       SUM(CASE WHEN status = 'ARCHIVED' AND deleted_at IS NULL THEN 1 ELSE 0 END) AS archived_count,
+                       SUM(CASE WHEN status = 'DELETED' OR deleted_at IS NOT NULL THEN 1 ELSE 0 END) AS deleted_count
+                FROM post
+                """,
+                (rs, rowNum) -> new PostStatsResponse(
+                        rs.getLong("total_count"),
+                        rs.getLong("published_count"),
+                        rs.getLong("draft_count"),
+                        rs.getLong("archived_count"),
+                        rs.getLong("deleted_count")));
+    }
+
+    List<PostCitationResponse> citationsForPost(Long postId) {
+        return jdbcTemplate.query(
+                """
+                SELECT COALESCE(NULLIF(ss.canonical_url, ''), ss.source_url) AS citation_url,
+                       ss.title AS citation_title
+                FROM post_revision pr
+                JOIN post_revision_source_snapshot prss ON prss.post_revision_id = pr.id
+                JOIN source_snapshot ss ON ss.id = prss.source_snapshot_id
+                WHERE pr.post_id = ?
+                  AND ss.policy_result = 'ALLOWED'
+                  AND (
+                      LOWER(COALESCE(NULLIF(ss.canonical_url, ''), ss.source_url)) LIKE 'http://%'
+                      OR LOWER(COALESCE(NULLIF(ss.canonical_url, ''), ss.source_url)) LIKE 'https://%'
+                  )
+                ORDER BY pr.revision_number ASC, prss.citation_order ASC, ss.id ASC
+                """,
+                rs -> {
+                    Map<String, PostCitationResponse> citationsByUrl = new LinkedHashMap<>();
+                    while (rs.next()) {
+                        var url = rs.getString("citation_url");
+                        if (url != null && !url.isBlank()) {
+                            citationsByUrl.putIfAbsent(url, new PostCitationResponse(url, rs.getString("citation_title")));
+                        }
+                    }
+                    return List.copyOf(citationsByUrl.values());
+                },
+                postId);
+    }
+
     Map<Long, List<String>> categoryNamesByPostIds(List<Long> postIds) {
         return postIds.isEmpty()
                 ? Map.of()
@@ -240,6 +357,18 @@ class PostQueryRepository {
 
     private String placeholders(int size) {
         return String.join(", ", java.util.Collections.nCopies(size, "?"));
+    }
+
+    private String taxonomyLikeQuery(String query) {
+        var normalized = query == null ? "" : query.trim().toLowerCase(java.util.Locale.ROOT);
+        return normalized.isEmpty() ? "__gtublog_no_blank_taxonomy_match__" : "%" + escapeLikeLiteral(normalized) + "%";
+    }
+
+    private String escapeLikeLiteral(String value) {
+        return value
+                .replace("!", "!!")
+                .replace("%", "!%")
+                .replace("_", "!_");
     }
 
     private Map<Long, List<String>> aggregateNamesByPostId(ResultSet rs) throws SQLException {

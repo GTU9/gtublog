@@ -7,8 +7,8 @@ import {
   mockPostSummaries,
   mockSearchPage,
   mockTagPage,
-} from "@/src/mock-content";
-import { defaultRevalidateSeconds, isDevelopmentRuntime, publicApiBaseUrl } from "@/src/site";
+} from "./mock-content";
+import { defaultRevalidateSeconds, isDevelopmentRuntime, publicApiBaseUrl } from "./site";
 
 type RequestOptions<T> = {
   fallback: T;
@@ -95,6 +95,45 @@ export async function getFreshArchiveEntries() {
     devFallback: mockArchiveEntries(),
     fresh: true,
   });
+}
+
+export async function getArchivePosts(year: number, month: number, page = 0, size = 12) {
+  return requestJson<PostPage<PostSummary>>(`/archive/${year}/${month}?page=${page}&size=${size}`, {
+    fallback: { items: [], page, size, totalElements: 0, totalPages: 0 },
+    devFallback: (() => {
+      const matches = mockPostSummaries.filter((post) => post.firstPublishedAt?.startsWith(`${year}-${String(month).padStart(2, "0")}-`));
+      return { items: matches.slice(page * size, (page + 1) * size), page, size, totalElements: matches.length, totalPages: Math.ceil(matches.length / size) };
+    })(),
+  });
+}
+
+// Sitemap export must fail on unavailable pages rather than silently publish a partial index.
+export async function listSitemapPosts() {
+  async function readPage(page: number): Promise<PostPage<PostSummary>> {
+    const response = await fetch(`${publicApiBaseUrl}/posts?page=${page}&size=50`, {
+      next: { revalidate: defaultRevalidateSeconds }, signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) throw new Error("Sitemap source is unavailable.");
+    const result = await response.json() as PostPage<PostSummary>;
+    if (!Number.isSafeInteger(result.totalPages) || result.totalPages < 0 || !Number.isSafeInteger(result.totalElements) || result.totalElements < 0 || !Array.isArray(result.items) || result.page !== page) {
+      throw new Error("Sitemap source returned an invalid page.");
+    }
+    return result;
+  }
+  let first: PostPage<PostSummary>;
+  try { first = await readPage(0); }
+  catch (error) {
+    if (isDevelopmentRuntime()) return mockPostSummaries;
+    throw error;
+  }
+  const posts = new Map(first.items.map((post) => [post.id, post]));
+  for (let index = 1; index < first.totalPages; index++) {
+    const page = await readPage(index);
+    if (page.items.length === 0 || page.totalElements !== first.totalElements || page.totalPages !== first.totalPages) throw new Error("Sitemap source changed during export; retry required.");
+    for (const post of page.items) posts.set(post.id, post);
+  }
+  if (posts.size !== first.totalElements) throw new Error("Sitemap source changed during export; retry required.");
+  return [...posts.values()];
 }
 
 export async function listAllPosts(maxPages = 10, size = 50) {

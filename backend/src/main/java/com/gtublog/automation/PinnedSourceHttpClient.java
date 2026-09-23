@@ -176,7 +176,7 @@ public class PinnedSourceHttpClient {
         return new ResponseHead(statusCode, Map.copyOf(headers));
     }
 
-    private byte[] readBody(InputStream input, Map<String, String> headers) throws IOException {
+    byte[] readBody(InputStream input, Map<String, String> headers) throws IOException {
         String transferEncoding = headers.getOrDefault("transfer-encoding", "").toLowerCase(Locale.ROOT);
         if (transferEncoding.contains("chunked")) {
             return readChunkedBody(input);

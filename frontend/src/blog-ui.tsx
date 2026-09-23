@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import type { ArchiveEntry, PostPage, PostSummary, TaxonomyItem } from "@/src/content-types";
+import { pageHref } from "@/src/pagination";
 
 function formatDate(value: string | null) {
   if (!value) {
@@ -85,15 +86,17 @@ export function SearchForm({ defaultValue = "" }: { defaultValue?: string }) {
 
 export function PostGrid({
   page,
+  basePath = "/",
   emptyTitle,
   emptyDescription,
 }: {
   page: PostPage<PostSummary>;
+  basePath?: string;
   emptyTitle: string;
   emptyDescription: string;
 }) {
   if (page.items.length === 0) {
-    return <EmptyState title={emptyTitle} description={emptyDescription} />;
+    return <><EmptyState title={emptyTitle} description={emptyDescription} /><Pagination currentPage={page.page} totalPages={page.totalPages} basePath={basePath} /></>;
   }
 
   return (
@@ -103,7 +106,7 @@ export function PostGrid({
           <PostCard key={post.id} post={post} />
         ))}
       </section>
-      <Pagination currentPage={page.page} totalPages={page.totalPages} />
+      <Pagination currentPage={page.page} totalPages={page.totalPages} basePath={basePath} />
     </>
   );
 }
@@ -160,19 +163,23 @@ export function TaxonomyList({
 export function Pagination({
   currentPage,
   totalPages,
+  basePath = "/",
 }: {
   currentPage: number;
   totalPages: number;
+  basePath?: string;
 }) {
-  if (totalPages <= 1) {
+  if (totalPages <= 1 && currentPage === 0) {
     return null;
   }
 
   return (
     <nav className="pagination" aria-label="페이지 이동">
+      {currentPage > 0 ? <Link href={pageHref(basePath, Math.max(0, Math.min(currentPage - 1, totalPages - 1)))} rel="prev">이전 페이지</Link> : null}
       <span>
-        {currentPage + 1} / {totalPages} 페이지
+        {currentPage < totalPages ? `${currentPage + 1} / ${totalPages} 페이지` : "요청한 페이지에 글이 없습니다."}
       </span>
+      {currentPage + 1 < totalPages ? <Link href={pageHref(basePath, currentPage + 1)} rel="next">다음 페이지</Link> : null}
     </nav>
   );
 }
@@ -187,7 +194,7 @@ export function ArchiveList({ entries }: { entries: ArchiveEntry[] }) {
       {entries.map((entry) => (
         <article className="archive-card" key={`${entry.year}-${entry.month}`}>
           <h2>
-            {entry.year}년 {entry.month}월
+            <Link href={`/archive?year=${entry.year}&month=${entry.month}`}>{entry.year}년 {entry.month}월</Link>
           </h2>
           <p>발행 글 {entry.count}개</p>
         </article>

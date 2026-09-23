@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import com.github.tomakehurst.wiremock.core.Options;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -60,7 +61,8 @@ class AutomationPipelineIntegrationTests {
             .withUsername("gtublog")
             .withPassword("gtublog-test-password");
 
-    private static final WireMockServer WIREMOCK = new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicPort());
+    private static final WireMockServer WIREMOCK = new WireMockServer(WireMockConfiguration.wireMockConfig()
+            .dynamicPort().useChunkedTransferEncoding(Options.ChunkedEncodingPolicy.BODY_FILE));
 
     static {
         MYSQL.start();
