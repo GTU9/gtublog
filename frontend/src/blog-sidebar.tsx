@@ -85,7 +85,7 @@ export async function BlogSidebar() {
           <ul className="sidebar-list sidebar-list-compact">
             {archiveItems.map((entry) => (
               <li key={`${entry.year}-${entry.month}`}>
-                <Link href="/archive">
+                <Link href={`/archive?year=${entry.year}&month=${entry.month}`}>
                   {entry.year}년 {entry.month}월 · 총 {entry.count}건
                 </Link>
               </li>

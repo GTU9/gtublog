@@ -2,12 +2,14 @@ import { BlogSidebar } from "@/src/blog-sidebar";
 import { PostGrid, SearchForm, Shell } from "@/src/blog-ui";
 import { defaultMetadata } from "@/src/metadata";
 import { listFreshPosts } from "@/src/public-api";
+import { pageIndex } from "@/src/pagination";
 import { siteDescription, siteName, siteTagline } from "@/src/site";
 
 export const metadata = defaultMetadata();
 
-export default async function HomePage() {
-  const page = await listFreshPosts(0, 12);
+export default async function HomePage({ searchParams }: { searchParams: Promise<{ page?: string | string[] }> }) {
+  const query = await searchParams;
+  const page = await listFreshPosts(pageIndex(query.page), 12);
 
   return (
     <Shell title={siteName} description={siteDescription} aside={<BlogSidebar />}>

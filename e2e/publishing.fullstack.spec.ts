@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 test("real Spring, MySQL, and Next publish an administrator-authored post", async ({ page, request }) => {
+  test.setTimeout(120_000);
   const suffix = process.env.E2E_POST_SUFFIX ?? Date.now().toString(36);
   const categoryName = process.env.E2E_CATEGORY_NAME ?? `Full-stack ${suffix}`;
   const categorySlug = process.env.E2E_CATEGORY_SLUG ?? `full-stack-${suffix}`;
@@ -12,7 +13,9 @@ test("real Spring, MySQL, and Next publish an administrator-authored post", asyn
   const loginResponse = page.waitForResponse((response) =>
     response.url() === `http://127.0.0.1:${backendPort}/api/v1/auth/login` && response.request().method() === "POST");
   await page.getByRole("button", { name: "로그인" }).click();
-  expect((await loginResponse).ok()).toBeTruthy();
+  const login = await loginResponse;
+  expect(login.ok()).toBeTruthy();
+  const session = await login.json();
   await expect(page.getByRole("heading", { name: "대시보드" })).toBeVisible();
 
   await page.getByRole("link", { name: "분류 관리" }).click();
@@ -51,4 +54,35 @@ test("real Spring, MySQL, and Next publish an administrator-authored post", asyn
   await page.goto(`/posts/${postSlug}`);
   await expect(page.getByRole("heading", { name: postTitle })).toBeVisible();
   await expect(page.getByText("Real Spring and MySQL content.")).toBeVisible();
+
+  const authorization = { Authorization: `Bearer ${session.accessToken}` };
+  const categoryId = publicPost.categories.find((category: { slug: string }) => category.slug === categorySlug).id;
+  for (let index = 0; index < 20; index++) {
+    const created = await request.post(`http://127.0.0.1:${backendPort}/api/v1/admin/posts`, {
+      headers: authorization,
+      data: { slug: `navigation-${suffix}-${index}`, title: `Navigation ${suffix} ${index}`, excerpt: "Pagination regression fixture",
+        contentMarkdown: "Navigation body", contentHtml: "<p>Navigation body</p>", categoryIds: [categoryId], tagIds: [], sourceFingerprint: null, revisionNote: "Navigation regression" },
+    });
+    expect(created.status()).toBe(201);
+    const post = await created.json();
+    expect((await request.post(`http://127.0.0.1:${backendPort}/api/v1/admin/posts/${post.id}/publish`, { headers: authorization })).ok()).toBeTruthy();
+  }
+  const stats = await request.get(`http://127.0.0.1:${backendPort}/api/v1/admin/posts/stats`, { headers: authorization });
+  expect(stats.ok()).toBeTruthy();
+  expect((await stats.json()).published).toBeGreaterThanOrEqual(21);
+
+  await page.goto(`/categories/${categorySlug}`);
+  await page.getByRole("link", { name: "다음 페이지" }).click();
+  await expect(page).toHaveURL(new RegExp(`/categories/${categorySlug}\\?page=2$`));
+  await expect(page.getByRole("link", { name: postTitle, exact: true })).toBeVisible();
+  await page.goto(`/search?q=${encodeURIComponent(categoryName)}`);
+  await expect(page.getByLabel("글 목록").getByRole("article")).toHaveCount(12);
+  await page.getByRole("link", { name: "다음 페이지" }).click();
+  expect(new URL(page.url()).searchParams.get("q")).toBe(categoryName);
+  await expect(page.getByRole("link", { name: postTitle, exact: true })).toBeVisible();
+
+  const [year, month] = publicPost.firstPublishedAt.split("-");
+  await page.goto(`/archive?year=${year}&month=${Number(month)}`);
+  await expect(page.getByRole("heading", { name: `${year}년 ${Number(month)}월 아카이브` })).toBeVisible();
+  await expect(page.getByLabel("글 목록")).toBeVisible();
 });

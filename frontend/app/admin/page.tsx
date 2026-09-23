@@ -2,14 +2,15 @@
 
 import { useEffect, useState } from "react";
 
-import { fetchAdminPosts, fetchAuditEntries, fetchCategories, fetchTags } from "@/src/admin-api";
+import { fetchAdminPosts, fetchAdminPostStats, fetchAuditEntries, fetchCategories, fetchTags } from "@/src/admin-api";
 import { useAdminAuth } from "@/src/admin-auth";
 import { AdminPageHeader, DashboardStats, LoadingCard, MessageCard } from "@/src/admin-ui";
-import type { AdminPostPage, AuditPage, TaxonomyResponse } from "@/src/admin-types";
+import type { AdminPostPage, AdminPostStats, AuditPage, TaxonomyResponse } from "@/src/admin-types";
 
 export default function AdminDashboardPage() {
   const auth = useAdminAuth();
   const [posts, setPosts] = useState<AdminPostPage | null>(null);
+  const [stats, setStats] = useState<AdminPostStats | null>(null);
   const [categories, setCategories] = useState<TaxonomyResponse[]>([]);
   const [tags, setTags] = useState<TaxonomyResponse[]>([]);
   const [audit, setAudit] = useState<AuditPage | null>(null);
@@ -22,6 +23,7 @@ export default function AdminDashboardPage() {
 
     void Promise.all([
       fetchAdminPosts(auth.authenticatedFetch).then(setPosts),
+      fetchAdminPostStats(auth.authenticatedFetch).then(setStats),
       fetchCategories(auth.authenticatedFetch).then(setCategories),
       fetchTags(auth.authenticatedFetch).then(setTags),
       fetchAuditEntries(auth.authenticatedFetch).then(setAudit),
@@ -36,7 +38,7 @@ export default function AdminDashboardPage() {
       />
       {error ? <MessageCard title="대시보드를 불러올 수 없습니다" description={error} tone="error" /> : null}
       {posts || audit ? (
-        <DashboardStats posts={posts} categories={categories} tags={tags} audit={audit} />
+        <DashboardStats posts={posts} stats={stats} categories={categories} tags={tags} audit={audit} />
       ) : (
         <LoadingCard message="관리자 대시보드를 불러오는 중입니다..." />
       )}

@@ -115,6 +115,7 @@ export const mockPostDetails: PostDetail[] = [
 ];
 
 mockPostDetails[0].relatedPosts = [summaryOf(mockPostDetails[1]), summaryOf(mockPostDetails[2])];
+mockPostDetails[0].citations = [{ url: "https://spring.io/projects/spring-boot", title: "Spring Boot 공식 문서" }];
 mockPostDetails[1].relatedPosts = [summaryOf(mockPostDetails[0])];
 mockPostDetails[2].relatedPosts = [summaryOf(mockPostDetails[0])];
 

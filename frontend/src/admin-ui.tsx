@@ -6,6 +6,7 @@ import { useMemo } from "react";
 import type {
   AdminPostDetail,
   AdminPostPage,
+  AdminPostStats,
   AuditPage,
   AuditEntryResponse,
   AutomationDiagnosticsResponse,
@@ -80,27 +81,28 @@ export function MessageCard({
 
 export function DashboardStats({
   posts,
+  stats,
   categories,
   tags,
   audit,
 }: {
   posts: AdminPostPage | null;
+  stats: AdminPostStats | null;
   categories: TaxonomyResponse[];
   tags: TaxonomyResponse[];
   audit: AuditPage | null;
 }) {
-  const publishedCount = posts?.items.filter((post) => post.status === "PUBLISHED").length ?? 0;
 
   return (
     <>
       <div className="admin-stats">
         <article className="admin-card">
           <h3>전체 글</h3>
-          <p className="stat-value">{posts?.totalElements ?? 0}</p>
+          <p className="stat-value">{stats?.total ?? "—"}</p>
         </article>
         <article className="admin-card">
           <h3>발행 완료</h3>
-          <p className="stat-value">{publishedCount}</p>
+          <p className="stat-value">{stats?.published ?? "—"}</p>
         </article>
         <article className="admin-card">
           <h3>카테고리</h3>

@@ -30,6 +30,11 @@ public class AdminPostController {
         return postService.adminPosts(page, size);
     }
 
+    @GetMapping("/stats")
+    public PostStatsResponse stats() {
+        return postService.adminStats();
+    }
+
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
     public PostDetailResponse create(@Valid @RequestBody PostUpsertRequest request) {

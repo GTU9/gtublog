@@ -62,10 +62,12 @@ export default async function PostDetailPage({ params }: Props) {
         />
         <section className="stack">
           <h2>출처 링크</h2>
-          <EmptyState
+          {post.citations?.length ? <ul>{post.citations.map((citation) => (
+            <li key={citation.url}><a href={citation.url} rel="nofollow noopener noreferrer">{citation.title || citation.url}</a></li>
+          ))}</ul> : <EmptyState
             title="아직 연결된 출처 링크가 없습니다."
-            description="출처 기반 발행 흐름이 연결되면 검증된 링크가 이곳에 함께 표시됩니다."
-          />
+            description="이 글에는 별도로 등록된 원문 출처가 없습니다."
+          />}
         </section>
         <section className="stack">
           <h2>함께 보면 좋은 글</h2>

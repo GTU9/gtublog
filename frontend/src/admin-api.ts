@@ -3,6 +3,7 @@
 import type {
   AdminPostDetail,
   AdminPostPage,
+  AdminPostStats,
   AdminPostUpsertRequest,
   AuditPage,
   AutomationDiagnosticsResponse,
@@ -86,6 +87,19 @@ export async function fetchAdminPosts(authenticatedFetch: (input: string, init?:
       return mockAdminPosts();
     }
     throw new Error("Failed to fetch admin posts.");
+  }
+}
+
+export async function fetchAdminPostStats(authenticatedFetch: (input: string, init?: RequestInit) => Promise<Response>): Promise<AdminPostStats> {
+  try {
+    const response = await authenticatedFetch(`${applicationApiBaseUrl}/admin/posts/stats`);
+    return await parseOrThrow<AdminPostStats>(response, "글 통계를 불러오지 못했습니다.");
+  } catch (error) {
+    if (!isDevelopmentRuntime()) throw error;
+    const posts = mockAdminPosts().items;
+    return { total: posts.length, published: posts.filter((post) => post.status === "PUBLISHED").length,
+      draft: posts.filter((post) => post.status === "DRAFT").length, archived: posts.filter((post) => post.status === "ARCHIVED").length,
+      deleted: posts.filter((post) => post.status === "DELETED").length };
   }
 }
 

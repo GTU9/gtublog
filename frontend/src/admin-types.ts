@@ -58,6 +58,7 @@ export type AdminPostUpsertRequest = {
 
 export type AuditPage = PostPage<AuditEntryResponse>;
 export type AdminPostPage = PostPage<PostSummary>;
+export type AdminPostStats = { total: number; published: number; draft: number; archived: number; deleted: number };
 export type AdminPostDetail = PostDetail;
 
 export type AutomationTopicResponse = {

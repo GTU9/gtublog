@@ -8,6 +8,7 @@ import com.gtublog.audit.AuditTargetType;
 import com.gtublog.taxonomy.CategoryRepository;
 import com.gtublog.taxonomy.TagRepository;
 import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -135,8 +136,14 @@ public class PostService {
     @Transactional(readOnly = true)
     public PostPageResponse<PostSummaryResponse> adminPosts(int page, int size) {
         var bounded = boundedSize(size);
-        var result = postRepository.findAllActive(PageRequest.of(page, bounded));
-        return toPageResponse(result.getContent().stream().map(this::toSummary).toList(), page, bounded, result.getTotalElements(), result.getTotalPages());
+        var normalizedPage = validatedPage(page, bounded);
+        var result = postRepository.findAllActive(PageRequest.of(normalizedPage, bounded));
+        return toPageResponse(result.getContent().stream().map(this::toSummary).toList(), normalizedPage, bounded, result.getTotalElements(), result.getTotalPages());
+    }
+
+    @Transactional(readOnly = true)
+    public PostStatsResponse adminStats() {
+        return postQueryRepository.postStats();
     }
 
     @Transactional(readOnly = true)
@@ -173,40 +180,55 @@ public class PostService {
     @Transactional(readOnly = true)
     public PostPageResponse<PostSummaryResponse> publicPosts(int page, int size) {
         var bounded = boundedSize(size);
-        var result = postRepository.findPublished(PageRequest.of(page, bounded));
-        return toPageResponse(result.getContent().stream().map(this::toSummary).toList(), page, bounded, result.getTotalElements(), result.getTotalPages());
+        var normalizedPage = validatedPage(page, bounded);
+        var result = postRepository.findPublished(PageRequest.of(normalizedPage, bounded));
+        return toPageResponse(result.getContent().stream().map(this::toSummary).toList(), normalizedPage, bounded, result.getTotalElements(), result.getTotalPages());
     }
 
     @Transactional(readOnly = true)
     public PostPageResponse<PostSummaryResponse> search(String query, int page, int size) {
         var bounded = boundedSize(size);
-        var offset = page * bounded;
+        var normalizedPage = validatedPage(page, bounded);
+        var offset = offset(normalizedPage, bounded);
         var projections = postQueryRepository.searchPublished(query, bounded, offset);
         var total = postQueryRepository.countSearchPublished(query);
-        return summarizePage(projections, page, bounded, total);
+        return summarizePage(projections, normalizedPage, bounded, total);
     }
 
     @Transactional(readOnly = true)
     public PostPageResponse<PostSummaryResponse> categoryPosts(String slug, int page, int size) {
         var bounded = boundedSize(size);
-        var offset = page * bounded;
+        var normalizedPage = validatedPage(page, bounded);
+        var offset = offset(normalizedPage, bounded);
         var projections = postQueryRepository.findPublishedByCategory(slug, bounded, offset);
         var total = postQueryRepository.countPublishedByCategory(slug);
-        return summarizePage(projections, page, bounded, total);
+        return summarizePage(projections, normalizedPage, bounded, total);
     }
 
     @Transactional(readOnly = true)
     public PostPageResponse<PostSummaryResponse> tagPosts(String slug, int page, int size) {
         var bounded = boundedSize(size);
-        var offset = page * bounded;
+        var normalizedPage = validatedPage(page, bounded);
+        var offset = offset(normalizedPage, bounded);
         var projections = postQueryRepository.findPublishedByTag(slug, bounded, offset);
         var total = postQueryRepository.countPublishedByTag(slug);
-        return summarizePage(projections, page, bounded, total);
+        return summarizePage(projections, normalizedPage, bounded, total);
     }
 
     @Transactional(readOnly = true)
     public List<PostArchiveEntryResponse> archive() {
         return postQueryRepository.archiveEntries();
+    }
+
+    @Transactional(readOnly = true)
+    public PostPageResponse<PostSummaryResponse> archiveMonth(int year, int month, int page, int size) {
+        var bounded = boundedSize(size);
+        var normalizedPage = validatedPage(page, bounded);
+        var start = utcMonthStart(year, month);
+        var end = start.plusMonths(1);
+        var projections = postQueryRepository.findPublishedInUtcMonth(start, end, bounded, offset(normalizedPage, bounded));
+        var total = postQueryRepository.countPublishedInUtcMonth(start, end);
+        return summarizePage(projections, normalizedPage, bounded, total);
     }
 
     private PostDetailResponse detail(Long postId, boolean publicOnly) {
@@ -223,6 +245,7 @@ public class PostService {
                 .map(tag -> new TaxonomyItemResponse(tag.getId(), tag.getSlug(), tag.getName(), tag.getDescription()))
                 .toList();
         var viewCount = postViewCounterRepository.findByPostId(postId).map(counter -> counter.getViewCount()).orElse(0L);
+        var citations = publicOnly ? postQueryRepository.citationsForPost(postId) : List.<PostCitationResponse>of();
         var related = postQueryRepository.relatedPublishedPosts(postId, 5).stream().map(this::toSummary).toList();
         return new PostDetailResponse(
                 post.getId(),
@@ -238,6 +261,7 @@ public class PostService {
                 viewCount,
                 categories,
                 tags,
+                citations,
                 related);
     }
 
@@ -334,7 +358,7 @@ public class PostService {
             int size,
             long total) {
         var items = projections.stream().map(this::toSummary).toList();
-        return toPageResponse(items, page, size, total, (int) Math.ceil((double) total / size));
+        return toPageResponse(items, page, size, total, totalPages(total, size));
     }
 
     private <T> PostPageResponse<T> toPageResponse(List<T> items, int page, int size, long totalElements, int totalPages) {
@@ -347,6 +371,39 @@ public class PostService {
 
     private int boundedSize(int requested) {
         return Math.max(1, Math.min(requested <= 0 ? 20 : requested, 50));
+    }
+
+    private int validatedPage(int requested, int size) {
+        if (requested < 0) {
+            throw new IllegalArgumentException("Page index must not be negative.");
+        }
+        if ((long) requested * (long) size > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("Page offset exceeds the maximum supported range.");
+        }
+        return requested;
+    }
+
+    private long offset(int page, int size) {
+        return (long) page * (long) size;
+    }
+
+    private int totalPages(long totalElements, int size) {
+        if (totalElements <= 0) {
+            return 0;
+        }
+        long pages = (totalElements + size - 1) / size;
+        return pages > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) pages;
+    }
+
+    private LocalDateTime utcMonthStart(int year, int month) {
+        if (year < 1000 || year > 9998) {
+            throw new IllegalArgumentException("Archive year must be between 1000 and 9998.");
+        }
+        try {
+            return LocalDateTime.of(year, month, 1, 0, 0);
+        } catch (DateTimeException exception) {
+            throw new IllegalArgumentException("Archive month must be a valid UTC calendar month.", exception);
+        }
     }
 
     private LocalDateTime now() {

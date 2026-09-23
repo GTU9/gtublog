@@ -57,4 +57,13 @@ public class PublicPostController {
     public List<PostArchiveEntryResponse> archive() {
         return postService.archive();
     }
+
+    @GetMapping("/archive/{year}/{month}")
+    public PostPageResponse<PostSummaryResponse> archiveMonth(
+            @PathVariable int year,
+            @PathVariable int month,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return postService.archiveMonth(year, month, page, size);
+    }
 }

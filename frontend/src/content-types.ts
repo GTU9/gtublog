@@ -34,6 +34,7 @@ export type PostDetail = {
   categories: TaxonomyItem[];
   tags: TaxonomyItem[];
   relatedPosts: PostSummary[];
+  citations?: { url: string; title: string | null }[];
 };
 
 export type PostPage<T> = {

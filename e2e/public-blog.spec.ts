@@ -11,6 +11,7 @@ test("public blog routes render meaningful SSR content", async ({ page }) => {
   await page.getByLabel("글 목록").getByRole("link", { name: "자동 발행 블로그에 Spring Boot를 선택한 이유" }).click();
   await expect(page.getByRole("heading", { name: "자동 발행 블로그에 Spring Boot를 선택한 이유" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "출처 링크", exact: true })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Spring Boot 공식 문서" })).toHaveAttribute("href", "https://spring.io/projects/spring-boot");
 
   await page.goto("/categories/development");
   await expect(page.getByRole("heading", { name: "개발 카테고리" })).toBeVisible();
@@ -27,6 +28,18 @@ test("public blog routes render meaningful SSR content", async ({ page }) => {
   await page.goto("/archive");
   await expect(page.getByRole("heading", { name: "아카이브", level: 1 })).toBeVisible();
   await expect(page.getByRole("link", { name: "2026년 6월 · 총 3건" })).toBeVisible();
+  await page.getByRole("link", { name: "2026년 6월 · 총 3건" }).click();
+  await expect(page).toHaveURL(/\/archive\?year=2026&month=6/);
+  await expect(page.getByRole("heading", { name: "2026년 6월 아카이브", level: 1 })).toBeVisible();
+  await expect(page.getByLabel("글 목록")).toBeVisible();
+});
+
+test("out-of-range pages provide navigation back to available posts", async ({ page }) => {
+  await page.goto("/search?q=자동화&page=2");
+  await page.getByRole("link", { name: "이전 페이지" }).click();
+  await expect(page).toHaveURL(/\/search\?q=/);
+  expect(new URL(page.url()).searchParams.get("q")).toBe("자동화");
+  await expect(page.getByLabel("글 목록")).toBeVisible();
 });
 
 test("rss, sitemap, and robots endpoints are exposed", async ({ request }) => {
