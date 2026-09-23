@@ -1,0 +1,6 @@
+{
+  "secret": "test-only-revalidation-secret-0123456789abcdef",
+  "timestamp": "1800000000",
+  "eventKey": "11111111-2222-4333-8444-555555555555",
+  "signature": "8a5882213a0170e7affdc81d8903c3e6c7242f24b6a97a5363711779405e8430"
+}

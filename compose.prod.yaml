@@ -28,6 +28,7 @@ services:
       GTUBLOG_APPLICATION_API_BASE_URL: ${GTUBLOG_APPLICATION_API_BASE_URL:-http://backend:8080/api/v1}
       NEXT_PUBLIC_GTUBLOG_APPLICATION_API_BASE_URL: ${NEXT_PUBLIC_GTUBLOG_APPLICATION_API_BASE_URL:-/api/v1}
       NEXT_PUBLIC_GTUBLOG_ENABLE_DEV_MOCKS: "false"
+      GTUBLOG_REVALIDATION_SHARED_SECRET: ${AUTOMATION_REVALIDATION_SHARED_SECRET:-replace-with-production-revalidation-secret}
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then((response)=>process.exit(response.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s

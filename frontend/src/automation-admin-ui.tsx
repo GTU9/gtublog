@@ -108,8 +108,12 @@ function formatOutboxStatus(status: string) {
   switch (status) {
     case "PENDING":
       return "대기";
+    case "IN_FLIGHT":
+      return "전달 중";
     case "DELIVERED":
       return "전달 완료";
+    case "DEAD_LETTER":
+      return "전달 실패 확정";
     default:
       return status;
   }
@@ -612,6 +616,14 @@ export function AutomationControlCenter({
               <strong>전달 완료 아웃박스</strong>
               <span className="muted">{diagnostics.outboxCounts.delivered}</span>
             </li>
+            <li>
+              <strong>전달 중 아웃박스</strong>
+              <span className="muted">{diagnostics.outboxCounts.inFlight}</span>
+            </li>
+            <li>
+              <strong>전달 실패 확정 아웃박스</strong>
+              <span className="muted">{diagnostics.outboxCounts.deadLetter}</span>
+            </li>
           </ul>
           <div>
             <h4>최근 보류 사유</h4>
@@ -639,8 +651,11 @@ export function AutomationControlCenter({
               <th>ID</th>
               <th>게시글</th>
               <th>상태</th>
+              <th>시도</th>
               <th>처리 가능 시각</th>
+              <th>임대 만료</th>
               <th>마지막 시도</th>
+              <th>실패 사유</th>
               <th>처리 완료</th>
             </tr>
           </thead>
@@ -652,8 +667,11 @@ export function AutomationControlCenter({
                 <td>
                   <span className="status-pill">{formatOutboxStatus(event.deliveryStatus)}</span>
                 </td>
+                <td>{event.attemptCount}</td>
                 <td>{formatDateTime(event.availableAt)}</td>
+                <td>{formatDateTime(event.leaseExpiresAt)}</td>
                 <td>{formatDateTime(event.lastAttemptAt)}</td>
+                <td>{event.failureReason ?? "-"}</td>
                 <td>{formatDateTime(event.processedAt)}</td>
               </tr>
             ))}

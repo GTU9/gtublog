@@ -178,6 +178,9 @@ export type AutomationOutboxResponse = {
   availableAt: string | null;
   processedAt: string | null;
   lastAttemptAt: string | null;
+  attemptCount: number;
+  leaseExpiresAt: string | null;
+  failureReason: string | null;
   createdAt: string;
 };
 
@@ -197,6 +200,8 @@ export type AutomationDiagnosticsResponse = {
   outboxCounts: {
     pending: number;
     delivered: number;
+    inFlight: number;
+    deadLetter: number;
   };
   heldSnapshotCount: number;
   recentHoldReasons: string[];

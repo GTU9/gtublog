@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 const frontendPort = process.env.E2E_FRONTEND_PORT ?? "13001";
 const backendPort = process.env.E2E_BACKEND_PORT ?? "18080";
+const revalidationSecret = "e2e-only-revalidation-secret-0123456789abcdef";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -10,7 +11,7 @@ export default defineConfig({
   workers: 1,
   forbidOnly: true,
   timeout: 60_000,
-  globalTimeout: 300_000,
+  globalTimeout: 600_000,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : "list",
   webServer: [
@@ -23,6 +24,9 @@ export default defineConfig({
         E2E_MYSQL_PORT: process.env.E2E_MYSQL_PORT ?? "13306",
         E2E_BACKEND_PORT: backendPort,
         E2E_FRONTEND_PORT: frontendPort,
+        AUTOMATION_REVALIDATION_BASE_URL: `http://127.0.0.1:${frontendPort}`,
+        AUTOMATION_REVALIDATION_SHARED_SECRET: revalidationSecret,
+        AUTOMATION_REVALIDATION_RETRY_INITIAL_DELAY: "PT2S",
       },
     },
     {
@@ -35,6 +39,7 @@ export default defineConfig({
         NEXT_PUBLIC_GTUBLOG_ENABLE_DEV_MOCKS: "false",
         GTUBLOG_SITE_URL: `http://127.0.0.1:${frontendPort}`,
         GTUBLOG_PUBLIC_API_BASE_URL: `http://127.0.0.1:${backendPort}/api/v1/public`,
+        GTUBLOG_REVALIDATION_SHARED_SECRET: revalidationSecret,
         NEXT_PUBLIC_GTUBLOG_APPLICATION_API_BASE_URL: `http://127.0.0.1:${backendPort}/api/v1`,
       },
     },

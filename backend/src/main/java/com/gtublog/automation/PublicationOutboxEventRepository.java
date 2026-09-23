@@ -7,5 +7,7 @@ public interface PublicationOutboxEventRepository extends JpaRepository<Publicat
 
     List<PublicationOutboxEvent> findTop20ByDeliveryStatusOrderByAvailableAtAsc(String deliveryStatus);
 
+    List<PublicationOutboxEvent> findTop20ByOrderByCreatedAtDesc();
+
     long countByDeliveryStatus(String deliveryStatus);
 }
