@@ -40,6 +40,18 @@ public class PublicationOutboxEvent extends BaseEntity {
     @Column(name = "last_attempt_at")
     private LocalDateTime lastAttemptAt;
 
+    @Column(name = "attempt_count", nullable = false)
+    private int attemptCount;
+
+    @Column(name = "claim_owner", length = 36)
+    private String claimOwner;
+
+    @Column(name = "lease_expires_at")
+    private LocalDateTime leaseExpiresAt;
+
+    @Column(name = "failure_reason", length = 255)
+    private String failureReason;
+
     protected PublicationOutboxEvent() {
     }
 
@@ -93,6 +105,14 @@ public class PublicationOutboxEvent extends BaseEntity {
         return payloadJson;
     }
 
+    public String getEventKey() {
+        return eventKey;
+    }
+
+    public String getEventType() {
+        return eventType;
+    }
+
     public LocalDateTime getAvailableAt() {
         return availableAt;
     }
@@ -105,15 +125,44 @@ public class PublicationOutboxEvent extends BaseEntity {
         return lastAttemptAt;
     }
 
+    public int getAttemptCount() {
+        return attemptCount;
+    }
+
+    public String getClaimOwner() {
+        return claimOwner;
+    }
+
+    public LocalDateTime getLeaseExpiresAt() {
+        return leaseExpiresAt;
+    }
+
+    public String getFailureReason() {
+        return failureReason;
+    }
+
     public void markDelivered(LocalDateTime processedAt) {
         this.deliveryStatus = "DELIVERED";
         this.processedAt = processedAt;
         this.lastAttemptAt = processedAt;
+        this.claimOwner = null;
+        this.leaseExpiresAt = null;
+        this.failureReason = null;
     }
 
     public void markRetry(LocalDateTime attemptedAt, LocalDateTime nextAvailableAt) {
         this.deliveryStatus = "PENDING";
         this.lastAttemptAt = attemptedAt;
         this.availableAt = nextAvailableAt;
+        this.claimOwner = null;
+        this.leaseExpiresAt = null;
+    }
+
+    public void markDeadLetter(LocalDateTime attemptedAt, String reason) {
+        this.deliveryStatus = "DEAD_LETTER";
+        this.lastAttemptAt = attemptedAt;
+        this.claimOwner = null;
+        this.leaseExpiresAt = null;
+        this.failureReason = reason;
     }
 }

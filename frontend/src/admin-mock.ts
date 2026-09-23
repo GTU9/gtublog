@@ -338,6 +338,9 @@ function createInitialAutomationOutbox(): AutomationOutboxResponse[] {
       availableAt: "2026-06-29T00:00:11Z",
       processedAt: "2026-06-29T00:00:12Z",
       lastAttemptAt: "2026-06-29T00:00:12Z",
+      attemptCount: 1,
+      leaseExpiresAt: null,
+      failureReason: null,
       createdAt: "2026-06-29T00:00:11Z",
     },
     {
@@ -348,6 +351,9 @@ function createInitialAutomationOutbox(): AutomationOutboxResponse[] {
       availableAt: "2026-06-29T08:20:00Z",
       processedAt: null,
       lastAttemptAt: "2026-06-29T08:15:00Z",
+      attemptCount: 1,
+      leaseExpiresAt: null,
+      failureReason: "Revalidation endpoint returned HTTP 503.",
       createdAt: "2026-06-29T08:10:00Z",
     },
   ];
@@ -787,6 +793,8 @@ export function mockAutomationDiagnostics(): AutomationDiagnosticsResponse {
     outboxCounts: {
       pending: automationOutboxStore.filter((item) => item.deliveryStatus === "PENDING").length,
       delivered: automationOutboxStore.filter((item) => item.deliveryStatus === "DELIVERED").length,
+      inFlight: automationOutboxStore.filter((item) => item.deliveryStatus === "IN_FLIGHT").length,
+      deadLetter: automationOutboxStore.filter((item) => item.deliveryStatus === "DEAD_LETTER").length,
     },
     heldSnapshotCount: 1,
     recentHoldReasons: automationRunsStore.map((item) => item.holdReason).filter((item): item is string => Boolean(item)),

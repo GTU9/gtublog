@@ -21,7 +21,7 @@ async function requestJson<T>(path: string, { fallback, devFallback, fresh }: Re
 
   try {
     const response = await fetch(url, {
-      ...(fresh ? { cache: "no-store" as const } : { next: { revalidate: defaultRevalidateSeconds } }),
+      ...(fresh ? { cache: "no-store" as const } : { next: { revalidate: defaultRevalidateSeconds, tags: ["public-posts"] } }),
       signal: AbortSignal.timeout(1500),
     });
 
@@ -111,7 +111,7 @@ export async function getArchivePosts(year: number, month: number, page = 0, siz
 export async function listSitemapPosts() {
   async function readPage(page: number): Promise<PostPage<PostSummary>> {
     const response = await fetch(`${publicApiBaseUrl}/posts?page=${page}&size=50`, {
-      next: { revalidate: defaultRevalidateSeconds }, signal: AbortSignal.timeout(5000),
+      next: { revalidate: defaultRevalidateSeconds, tags: ["public-posts"] }, signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) throw new Error("Sitemap source is unavailable.");
     const result = await response.json() as PostPage<PostSummary>;

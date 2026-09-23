@@ -5,6 +5,7 @@ import com.gtublog.analytics.PostViewCounterRepository;
 import com.gtublog.audit.AuditActorType;
 import com.gtublog.audit.AuditService;
 import com.gtublog.audit.AuditTargetType;
+import com.gtublog.automation.PublicationOutboxService;
 import com.gtublog.taxonomy.CategoryRepository;
 import com.gtublog.taxonomy.TagRepository;
 import java.time.Clock;
@@ -30,6 +31,7 @@ public class PostService {
     private final SlugService slugService;
     private final PostHtmlSanitizer postHtmlSanitizer;
     private final AuditService auditService;
+    private final PublicationOutboxService publicationOutboxService;
     private final Clock clock;
 
     public PostService(
@@ -42,6 +44,7 @@ public class PostService {
             SlugService slugService,
             PostHtmlSanitizer postHtmlSanitizer,
             AuditService auditService,
+            PublicationOutboxService publicationOutboxService,
             Clock clock) {
         this.postRepository = postRepository;
         this.postRevisionRepository = postRevisionRepository;
@@ -52,6 +55,7 @@ public class PostService {
         this.slugService = slugService;
         this.postHtmlSanitizer = postHtmlSanitizer;
         this.auditService = auditService;
+        this.publicationOutboxService = publicationOutboxService;
         this.clock = clock;
     }
 
@@ -79,12 +83,15 @@ public class PostService {
     public PostDetailResponse update(Long id, PostUpsertRequest request) {
         requireExistingTaxonomy(request.categoryIds(), request.tagIds());
         var post = postRepository.findById(id).orElseThrow();
+        var wasPublished = post.isPublished();
+        var oldSlug = post.getSlug();
         var slug = uniquePostSlug(request.slug(), request.title(), id);
         var sanitizedContentHtml = postHtmlSanitizer.sanitize(request.contentHtml());
         post.revise(slug, request.title(), request.excerpt(), request.contentMarkdown(), sanitizedContentHtml);
         postQueryRepository.replaceCategories(post.getId(), request.categoryIds());
         postQueryRepository.replaceTags(post.getId(), nullableIds(request.tagIds()));
         createRevision(post, RevisionSource.MANUAL_EDIT, request.revisionNote());
+        enqueuePublicMutationIfNeeded(post, "POST_UPDATED", wasPublished, oldSlug);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.POST, post.getId().toString(), "POST_UPDATED", Map.of("slug", slug));
         return detail(post.getId(), false);
     }
@@ -92,7 +99,10 @@ public class PostService {
     @Transactional
     public PostDetailResponse publish(Long id) {
         var post = postRepository.findById(id).orElseThrow();
+        var wasPublished = post.isPublished();
+        var oldSlug = post.getSlug();
         post.publish(now());
+        enqueuePublicMutationIfNeeded(post, "POST_PUBLISHED", wasPublished, oldSlug);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.POST, post.getId().toString(), "POST_PUBLISHED", Map.of("slug", post.getSlug()));
         return detail(post.getId(), false);
     }
@@ -100,7 +110,10 @@ public class PostService {
     @Transactional
     public PostDetailResponse archive(Long id) {
         var post = postRepository.findById(id).orElseThrow();
+        var wasPublished = post.isPublished();
+        var oldSlug = post.getSlug();
         post.archive(now());
+        enqueuePublicMutationIfNeeded(post, "POST_ARCHIVED", wasPublished, oldSlug);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.POST, post.getId().toString(), "POST_ARCHIVED", Map.of("slug", post.getSlug()));
         return detail(post.getId(), false);
     }
@@ -108,7 +121,10 @@ public class PostService {
     @Transactional
     public PostDetailResponse delete(Long id) {
         var post = postRepository.findById(id).orElseThrow();
+        var wasPublished = post.isPublished();
+        var oldSlug = post.getSlug();
         post.markDeleted(now());
+        enqueuePublicMutationIfNeeded(post, "POST_DELETED", wasPublished, oldSlug);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.POST, post.getId().toString(), "POST_DELETED", Map.of("slug", post.getSlug()));
         return detail(post.getId(), false);
     }
@@ -125,10 +141,13 @@ public class PostService {
     @Transactional
     public PostDetailResponse restoreRevision(Long postId, int revisionNumber) {
         var post = postRepository.findById(postId).orElseThrow();
+        var wasPublished = post.isPublished();
+        var oldSlug = post.getSlug();
         var revision = postRevisionRepository.findByPostIdAndRevisionNumber(postId, revisionNumber).orElseThrow();
         var sanitizedContentHtml = postHtmlSanitizer.sanitize(revision.getContentHtml());
         post.revise(post.getSlug(), revision.getTitle(), revision.getExcerpt(), revision.getContentMarkdown(), sanitizedContentHtml);
         createRevision(post, RevisionSource.MANUAL_RESTORE, "Revision " + revisionNumber + " restored.");
+        enqueuePublicMutationIfNeeded(post, "POST_REVISION_RESTORED", wasPublished, oldSlug);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.POST, post.getId().toString(), "POST_REVISION_RESTORED", Map.of("revisionNumber", revisionNumber));
         return detail(post.getId(), false);
     }
@@ -279,6 +298,24 @@ public class PostService {
                 post.getContentHtml(),
                 source,
                 note));
+    }
+
+    private void enqueuePublicMutationIfNeeded(Post post, String eventType, boolean wasPublished, String oldSlug) {
+        if (!wasPublished && !post.isPublished()) {
+            return;
+        }
+        publicationOutboxService.enqueuePostEvent(
+                post.getId(),
+                eventType,
+                post.getSlug(),
+                affectedSlugs(oldSlug, post.getSlug()));
+    }
+
+    private List<String> affectedSlugs(String oldSlug, String newSlug) {
+        return java.util.stream.Stream.of(oldSlug, newSlug)
+                .filter(slug -> slug != null && !slug.isBlank())
+                .distinct()
+                .toList();
     }
 
     private void requireExistingTaxonomy(List<Long> categoryIds, List<Long> tagIds) {

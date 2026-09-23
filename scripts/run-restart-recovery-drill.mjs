@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import http from "node:http";
 import net from "node:net";
@@ -13,12 +13,13 @@ const backendPort = process.env.RESTART_E2E_BACKEND_PORT ?? "18280";
 const frontendPort = process.env.RESTART_E2E_FRONTEND_PORT ?? "13201";
 const helperPort = process.env.RESTART_E2E_HELPER_PORT ?? "19191";
 const workerToken = "restart-drill-worker-token";
-const revalidateSecret = "restart-drill-revalidate-secret";
+const revalidateSecret = "restart-drill-revalidate-secret-0123456789";
 const baseUrl = `http://127.0.0.1:${backendPort}`;
 const helperBaseUrl = `http://127.0.0.1:${helperPort}`;
 const helperLocalhostUrl = `http://localhost:${helperPort}`;
 const backendEnvironment = {
   ...process.env,
+  JAVA_TOOL_OPTIONS: [process.env.JAVA_TOOL_OPTIONS, "-Djava.net.preferIPv4Stack=true"].filter(Boolean).join(" "),
   E2E_MYSQL_PORT: mysqlPort,
   E2E_BACKEND_PORT: backendPort,
   E2E_FRONTEND_PORT: frontendPort,
@@ -27,7 +28,7 @@ const backendEnvironment = {
   AUTOMATION_WORKER_PROVIDER: "fake-provider",
   AUTOMATION_REVALIDATION_BASE_URL: helperBaseUrl,
   AUTOMATION_REVALIDATION_SHARED_SECRET: revalidateSecret,
-  AUTOMATION_REVALIDATION_RETRY_DELAY: "PT2S",
+  AUTOMATION_REVALIDATION_RETRY_INITIAL_DELAY: "PT2S",
   AUTOMATION_RUN_RECOVERY_INTERVAL: "PT5S",
 };
 
@@ -217,13 +218,24 @@ function startHelperServer() {
     }
 
     if (request.method === "POST" && request.url === "/api/revalidate") {
-      if (request.headers["x-revalidate-secret"] !== revalidateSecret) {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const body = Buffer.concat(chunks);
+      const timestamp = request.headers["x-revalidation-timestamp"];
+      const eventKey = request.headers["x-revalidation-event-key"];
+      const signature = request.headers["x-revalidation-signature"];
+      const expected = typeof timestamp === "string" && typeof eventKey === "string"
+        ? createHmac("sha256", revalidateSecret).update(`${timestamp}\n${eventKey}\n`).update(body).digest()
+        : null;
+      const validSignature = expected !== null && typeof signature === "string"
+        && /^[0-9a-f]{64}$/.test(signature) && timingSafeEqual(expected, Buffer.from(signature, "hex"));
+      let payload;
+      try { payload = JSON.parse(body.toString("utf8")); } catch { payload = null; }
+      if (!validSignature || payload?.eventKey !== eventKey || payload?.version !== 1
+        || !Array.isArray(payload?.paths) || !payload?.tags?.includes("public-posts")) {
         response.writeHead(403, { "Content-Type": "application/json" });
-        response.end(JSON.stringify({ ok: false, reason: "bad-secret" }));
+        response.end(JSON.stringify({ ok: false, reason: "bad-signature" }));
         return;
-      }
-      for await (const _chunk of request) {
-        // drain body
       }
       if (helperMode === "fail") {
         response.writeHead(503, { "Content-Type": "application/json" });
@@ -406,8 +418,9 @@ async function createPublishedAutomationRun(token) {
 async function waitForPendingOutbox(token, minimum = 1) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const outbox = await api("/api/v1/admin/automation/outbox", { token });
-    if (outbox.length >= minimum) {
-      return outbox;
+    const pending = outbox.filter((event) => event.deliveryStatus === "PENDING");
+    if (pending.length >= minimum) {
+      return pending;
     }
     await sleep(500);
   }
@@ -415,14 +428,17 @@ async function waitForPendingOutbox(token, minimum = 1) {
 }
 
 async function waitForOutboxToDrain(token) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  let lastState = [];
+  for (let attempt = 0; attempt < 45; attempt += 1) {
+    await api("/api/v1/admin/automation/outbox/process", { method: "POST", token });
     const outbox = await api("/api/v1/admin/automation/outbox", { token });
-    if (outbox.length === 0) {
+    lastState = outbox.map((event) => ({ status: event.deliveryStatus, reason: event.failureReason }));
+    if (outbox.every((event) => event.deliveryStatus === "DELIVERED")) {
       return;
     }
     await sleep(1000);
   }
-  throw new Error("Pending outbox events were not drained after replay.");
+  throw new Error(`Pending outbox events were not drained after replay: ${JSON.stringify(lastState)}`);
 }
 
 async function createRecoverableAutomationRun(token) {
@@ -541,7 +557,6 @@ try {
   }
 
   helperMode = "success";
-  await api("/api/v1/admin/automation/outbox/process", { method: "POST", token });
   await waitForOutboxToDrain(token);
 
   const run = await createRecoverableAutomationRun(token);

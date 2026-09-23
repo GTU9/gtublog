@@ -4,6 +4,7 @@ Spring owns contract publication. Producers, consumers, fixtures, and contract t
 
 - `openapi/`: public, administrator, and worker HTTP APIs (Story 4 onward).
 - `automation/`: versioned generation job JSON schemas (Story 8 onward).
+- `revalidation/v1/`: signed Spring-to-Next public cache invalidation event and wire format.
 
 Current executable automation contract baseline:
 

@@ -10,5 +10,8 @@ public record AutomationOutboxResponse(
         LocalDateTime availableAt,
         LocalDateTime processedAt,
         LocalDateTime lastAttemptAt,
+        int attemptCount,
+        LocalDateTime leaseExpiresAt,
+        String failureReason,
         LocalDateTime createdAt) {
 }

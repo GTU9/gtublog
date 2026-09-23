@@ -1,9 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { listSitemapPosts } from "./public-api";
+import { listFreshPosts, listPosts, listSitemapPosts } from "./public-api";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe("complete sitemap enumeration", () => {
+  it("tags cached public data while preserving fresh homepage reads", async () => {
+    const fetch = vi.fn().mockResolvedValue(Response.json({ items: [], page: 0, size: 12, totalElements: 0, totalPages: 0 }));
+    vi.stubGlobal("fetch", fetch);
+    await listPosts();
+    await listFreshPosts();
+    expect(fetch.mock.calls[0][1]).toMatchObject({ next: { tags: ["public-posts"] } });
+    expect(fetch.mock.calls[1][1]).toMatchObject({ cache: "no-store" });
+  });
   it("includes posts beyond 500 and deduplicates boundary entries", async () => {
     const fetch = vi.fn(async (url: string) => {
       const page = Number(new URL(url).searchParams.get("page"));

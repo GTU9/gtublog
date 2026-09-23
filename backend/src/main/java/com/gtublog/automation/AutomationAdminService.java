@@ -307,7 +307,9 @@ public class AutomationAdminService {
                         generationJobService.countByStatus(GenerationJobStatus.FAILED)),
                 new AutomationDiagnosticsResponse.OutboxCounts(
                         publicationOutboxService.countByStatus("PENDING"),
-                        publicationOutboxService.countByStatus("DELIVERED")),
+                        publicationOutboxService.countByStatus("DELIVERED"),
+                        publicationOutboxService.countByStatus("IN_FLIGHT"),
+                        publicationOutboxService.countByStatus("DEAD_LETTER")),
                 sourceSnapshotRepository.countByPolicyResult(SourcePolicyResult.HELD),
                 recentHoldReasons,
                 LocalDateTime.now(ZoneOffset.UTC));
@@ -318,7 +320,6 @@ public class AutomationAdminService {
         return publicationOutboxService.recentEvents();
     }
 
-    @Transactional
     public void processOutbox() {
         publicationOutboxService.processPendingEvents();
     }

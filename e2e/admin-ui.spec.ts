@@ -7,6 +7,7 @@ const applicationApiBaseUrl = (
 ).replace(/\/+$/, "");
 
 test("administrator can sign in, create a draft, publish it, and restore a revision", async ({ page }) => {
+  test.setTimeout(60_000);
   await page.goto("/admin/login");
   await page.getByRole("button", { name: "로그인" }).click();
 

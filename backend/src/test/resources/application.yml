@@ -84,4 +84,10 @@ app:
     revalidation:
       base-url: ""
       shared-secret: revalidation-test-secret
-      retry-delay: PT1M
+      retry-initial-delay: PT30S
+      retry-max-delay: PT15M
+      request-timeout: PT5S
+      lease-duration: PT30S
+      poll-interval: PT30S
+      max-attempts: 5
+      batch-size: 20
