@@ -3,6 +3,7 @@ export type {
   GenerationRequest,
   GenerationResult,
   GenerationSnapshot,
+  SourceMentionObservation,
 } from "./provider.js";
 export { createGenerationWorker } from "./provider.js";
 export { createFakeGenerationProvider } from "./fake-provider.js";
@@ -14,6 +15,8 @@ export { exitCodeForError, type WorkerFailureExitCode } from "./exit-code.js";
 export { canonicalTerminalPayload, terminalPayloadDigest, terminalSubmissionId } from "./terminal.js";
 export {
   CONTRACT_SCHEMA_VERSION,
+  CONTRACT_SCHEMA_VERSION_V3,
+  CONTRACT_SCHEMA_VERSION_V4,
   createBackendGenerationClient,
   createWorkerRuntime,
   assertClaimResponse,

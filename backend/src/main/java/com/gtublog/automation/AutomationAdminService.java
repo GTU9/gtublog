@@ -422,6 +422,7 @@ public class AutomationAdminService {
 
     private AutomationRunDetailResponse.GeneratedDraftResponse generatedDraft(Long runId) {
         return generationJobRepository.findByRunId(runId)
+                .filter(job -> !"automation-job-v4".equals(job.getSchemaVersion()))
                 .filter(job -> job.getResultPayloadJson() != null && !job.getResultPayloadJson().isBlank())
                 .map(job -> {
                     try {

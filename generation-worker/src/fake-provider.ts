@@ -4,6 +4,23 @@ export function createFakeGenerationProvider(name = "fake-provider"): Generation
   return {
     name,
     generate(request: GenerationRequest): Promise<GenerationResult> {
+      if (request.schemaVersion === "automation-job-v4") {
+        const first = request.snapshots[0];
+        const second = request.snapshots[1];
+        if (!first || !second || !request.taxonomyCatalog) throw new Error("v4 fake provider requires two snapshots and taxonomy.");
+        return Promise.resolve({
+          observations: [{
+            kind: "SOURCE_MENTION",
+            literal: "Structured evidence mention shared by two source snapshots.",
+            citationSnapshotIds: [first.snapshotId, second.snapshotId],
+          }],
+          taxonomy: {
+            categoryId: request.taxonomyCatalog.categories[0].id,
+            tagIds: [request.taxonomyCatalog.tags[0].id],
+          },
+          provider: name,
+        });
+      }
       const firstSnapshot = request.snapshots[0];
       const title =
         firstSnapshot?.title?.trim() || `자동 수집 초안 ${request.topicId.toString()}`;

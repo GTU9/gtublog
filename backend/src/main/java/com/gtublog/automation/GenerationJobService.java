@@ -77,7 +77,7 @@ public class GenerationJobService {
             return existing.get();
         }
         GenerationJobClaimResponse.TaxonomyCatalog catalog = null;
-        if ("automation-job-v3".equals(automationProperties.worker().schemaVersion())) {
+        if (usesTaxonomyCatalog(automationProperties.worker().schemaVersion())) {
             catalog = automationTaxonomyService.snapshotCatalog();
             var catalogProblem = automationTaxonomyService.catalogProblem(catalog);
             if (catalogProblem != null) {
@@ -212,27 +212,27 @@ public class GenerationJobService {
             return submitResponse(job);
         }
 
-        if (request.draft() == null) {
-            throw new IllegalArgumentException("A successful generation submission must include a draft payload.");
+        if (request.draft() == null && (request.observations() == null || request.observations().isEmpty())) {
+            throw new IllegalArgumentException("A successful generation submission must include a success payload.");
         }
-        var storedDraft = new LinkedHashMap<String, Object>();
-        storedDraft.put("title", request.draft().title());
-        storedDraft.put("excerpt", request.draft().excerpt());
-        storedDraft.put("contentMarkdown", request.draft().contentMarkdown());
-        storedDraft.put("citationSnapshotIds", request.draft().citationSnapshotIds() == null
-                ? List.of() : request.draft().citationSnapshotIds());
-        if ("automation-job-v3".equals(job.getSchemaVersion())) {
-            storedDraft.put("taxonomy", request.draft().taxonomy());
-        }
-        job.submit(request.workerId(), request.terminalSubmissionId(), canonicalDigest, toJson(storedDraft), now);
+        job.submit(request.workerId(), request.terminalSubmissionId(), canonicalDigest, toJson(storedResultPayload(request)), now);
         platformMetricsService.recordGenerationJobEvent("submitted");
         var publicationDecision = automationPublicationService.processSubmission(
                 job, run, request, catalogForJob(job));
         var auditDetail = new LinkedHashMap<String, Object>();
-        auditDetail.put("citationCount", request.draft().citationSnapshotIds() == null ? 0 : request.draft().citationSnapshotIds().size());
-        if (request.draft().taxonomy() != null) {
+        if (request.draft() != null) {
+            auditDetail.put("citationCount", request.draft().citationSnapshotIds() == null ? 0 : request.draft().citationSnapshotIds().size());
+        }
+        if (request.observations() != null) {
+            auditDetail.put("observationCount", request.observations().size());
+        }
+        if (request.draft() != null && request.draft().taxonomy() != null) {
             auditDetail.put("categoryId", request.draft().taxonomy().categoryId());
             auditDetail.put("tagIds", request.draft().taxonomy().tagIds());
+        }
+        if (request.taxonomy() != null) {
+            auditDetail.put("categoryId", request.taxonomy().categoryId());
+            auditDetail.put("tagIds", request.taxonomy().tagIds());
         }
         auditDetail.put("published", publicationDecision.published());
         if (publicationDecision.postId() != null) {
@@ -252,6 +252,24 @@ public class GenerationJobService {
                 "GENERATION_JOB_SUBMITTED",
                 auditDetail);
         return submitResponse(job);
+    }
+
+    private Map<String, Object> storedResultPayload(GenerationJobSubmitRequest request) {
+        var stored = new LinkedHashMap<String, Object>();
+        if (request.draft() != null) {
+            stored.put("title", request.draft().title());
+            stored.put("excerpt", request.draft().excerpt());
+            stored.put("contentMarkdown", request.draft().contentMarkdown());
+            stored.put("citationSnapshotIds", request.draft().citationSnapshotIds() == null
+                    ? List.of() : request.draft().citationSnapshotIds());
+            if ("automation-job-v3".equals(request.schemaVersion())) {
+                stored.put("taxonomy", request.draft().taxonomy());
+            }
+            return stored;
+        }
+        stored.put("observations", request.observations());
+        stored.put("taxonomy", request.taxonomy());
+        return stored;
     }
 
     @Transactional(readOnly = true)
@@ -295,7 +313,7 @@ public class GenerationJobService {
                 job.getSchemaVersion(),
                 (String) payload.get("prompt"),
                 snapshots,
-                "automation-job-v3".equals(job.getSchemaVersion()) ? catalogFromPayload(payload) : null);
+                usesTaxonomyCatalog(job.getSchemaVersion()) ? catalogFromPayload(payload) : null);
     }
 
     private Map<String, Object> payload(AutomationTopic topic, AutomationRun run, List<SourceSnapshot> snapshots,
@@ -324,12 +342,12 @@ public class GenerationJobService {
     }
 
     GenerationJobClaimResponse.TaxonomyCatalog catalogForJob(GenerationJob job) {
-        return "automation-job-v3".equals(job.getSchemaVersion())
+        return usesTaxonomyCatalog(job.getSchemaVersion())
                 ? catalogFromPayload(readPayload(job.getRequestPayloadJson())) : null;
     }
 
     boolean selectionInJobCatalog(GenerationJob job, GenerationJobSubmitRequest.TaxonomySelection selection) {
-        return "automation-job-v3".equals(job.getSchemaVersion())
+        return usesTaxonomyCatalog(job.getSchemaVersion())
                 && automationTaxonomyService.selectionProblem(catalogForJob(job), selection) == null;
     }
 
@@ -362,7 +380,9 @@ public class GenerationJobService {
             builder.append("- canonicalUrl: ").append(snapshot.getCanonicalUrl()).append("\n");
             builder.append("- excerpt: ").append(snapshot.getBodyExcerpt()).append("\n\n");
         }
-        if (includeTaxonomy) {
+        if ("automation-job-v4".equals(automationProperties.worker().schemaVersion())) {
+            builder.append("응답은 최대 3개의 SOURCE_MENTION 관찰만 포함하세요. 각 관찰은 출처 본문에 그대로 나타난 20~160자 문구와 서로 다른 citation snapshot id 정확히 2개를 가져야 합니다. 제목, 요약, 본문 마크다운은 만들지 마세요. 제공된 분류 목록에서 categoryId 하나 및 tagIds 1~5개를 선택하세요.");
+        } else if (includeTaxonomy) {
             builder.append("응답에 제목, 요약, 본문 마크다운, citation snapshot id 목록과 제공된 분류 목록에서 선택한 categoryId 하나 및 tagIds 1~5개를 포함하세요.");
         } else {
             builder.append("응답은 제목, 요약, 본문 마크다운, citation snapshot id 목록만 포함한 구조화 초안으로 제한하세요.");
@@ -399,6 +419,10 @@ public class GenerationJobService {
         return new GenerationJobSubmitResponse(
                 job.getId(), job.getJobStatus().name(), job.getSubmittedAt().toInstant(ZoneOffset.UTC),
                 job.getTerminalSubmissionId(), job.getTerminalPayloadDigest());
+    }
+
+    private boolean usesTaxonomyCatalog(String schemaVersion) {
+        return "automation-job-v3".equals(schemaVersion) || "automation-job-v4".equals(schemaVersion);
     }
 
     private LocalDateTime cappedWorkerLease(LocalDateTime now, AutomationRun run) {

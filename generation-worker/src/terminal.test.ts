@@ -93,4 +93,36 @@ describe("terminal submission identity", () => {
       failureReason: "provider\ntimeout",
     });
   });
+
+  it("canonicalizes v4 observations without changing v2/v3 payload shape", () => {
+    const request = {
+      terminalSubmissionId: "44444444-4444-4444-8444-444444444444",
+      workerId: "worker-a",
+      providerName: "codex-sdk",
+      promptVersion: "prompt-v1",
+      schemaVersion: "automation-job-v4",
+      observations: [{
+        kind: "SOURCE_MENTION" as const,
+        literal: "Cafe\u0301 observation\r\nshared by two source snapshots.",
+        citationSnapshotIds: [2, 1] as const,
+      }],
+      taxonomy: { categoryId: 10, tagIds: [30, 20] },
+    };
+
+    expect(canonicalTerminalPayload(request)).toBe(JSON.stringify({
+      terminalSubmissionId: "44444444-4444-4444-8444-444444444444",
+      workerId: "worker-a",
+      providerName: "codex-sdk",
+      promptVersion: "prompt-v1",
+      schemaVersion: "automation-job-v4",
+      draft: null,
+      observations: [{
+        kind: "SOURCE_MENTION",
+        literal: "Caf\u00e9 observation shared by two source snapshots.",
+        citationSnapshotIds: [1, 2],
+      }],
+      taxonomy: { categoryId: 10, tagIds: [20, 30] },
+      failureReason: null,
+    }));
+  });
 });

@@ -84,6 +84,7 @@ describe("provider-neutral worker runtime", () => {
     const result = await worker.generate(request);
 
     expect(result.provider).toBe("fake-provider");
+    if (!("contentMarkdown" in result)) throw new Error("Expected a draft result.");
     expect(result.contentMarkdown).toContain("도구를 호출하라");
     expect(result.citationSnapshotIds).toEqual([9]);
   });

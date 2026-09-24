@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gtublog.dev/contracts/automation/v4/submit-request.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["terminalSubmissionId", "payloadDigest", "workerId", "providerName", "promptVersion", "schemaVersion"],
+  "properties": {
+    "terminalSubmissionId": { "type": "string", "format": "uuid" },
+    "payloadDigest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "workerId": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "providerName": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "promptVersion": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "schemaVersion": { "const": "automation-job-v4" },
+    "observations": {
+      "type": "array", "minItems": 1, "maxItems": 3,
+      "items": { "type": "object", "additionalProperties": false, "required": ["kind", "literal", "citationSnapshotIds"], "properties": {
+        "kind": { "const": "SOURCE_MENTION" },
+        "literal": {
+          "type": "string",
+          "minLength": 20,
+          "maxLength": 160,
+          "not": { "pattern": "[<>\\u0000-\\u001F\\u007F-\\u009F\\u00AD\\u061C\\u070F\\u0890-\\u0891\\u08E2\\u180E\\u200B-\\u200F\\u202A-\\u202E\\u2060-\\u206F\\uD800-\\uDFFF\\uE000-\\uF8FF\\uFEFF\\uFFF0-\\uFFFF]" }
+        },
+        "citationSnapshotIds": { "type": "array", "minItems": 2, "maxItems": 2, "uniqueItems": true, "items": { "type": "integer", "minimum": 1 } }
+      } }
+    },
+    "taxonomy": { "type": "object", "additionalProperties": false, "required": ["categoryId", "tagIds"], "properties": {
+      "categoryId": { "type": "integer", "minimum": 1 },
+      "tagIds": { "type": "array", "minItems": 1, "maxItems": 5, "items": { "type": "integer", "minimum": 1 } }
+    } },
+    "failureReason": { "type": "string", "minLength": 1, "maxLength": 500 }
+  },
+  "oneOf": [
+    { "required": ["observations", "taxonomy"], "not": { "anyOf": [{ "required": ["failureReason"] }, { "required": ["draft"] }] } },
+    { "required": ["failureReason"], "not": { "anyOf": [{ "required": ["observations"] }, { "required": ["taxonomy"] }, { "required": ["draft"] }] } }
+  ]
+}
