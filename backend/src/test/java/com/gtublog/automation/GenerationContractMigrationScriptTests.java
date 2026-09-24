@@ -22,4 +22,24 @@ class GenerationContractMigrationScriptTests {
                 .doesNotContain("UPDATE generation_job")
                 .doesNotContain("DELETE FROM generation_job");
     }
+
+    @Test
+    void v17ClaimBackfillUsesDeterministicRepresentativePostAndPreservesExistingContent() throws Exception {
+        var migration = Files.readString(Path.of(
+                "src/main/resources/db/migration/mysql/V17__automation_publication_claims.sql"));
+
+        assertThat(migration)
+                .contains("CREATE TABLE automation_publication_claim")
+                .contains("CONSTRAINT uk_automation_publication_claim_type_hash UNIQUE (claim_type, claim_hash)")
+                .contains("'SOURCE_FINGERPRINT'")
+                .contains("'CANONICAL_URL'")
+                .contains("MIN(id)")
+                .contains("MIN(post_record.id)")
+                .contains("GROUP BY source_fingerprint")
+                .contains("GROUP BY SHA2(snapshot.canonical_url, 256), snapshot.canonical_url")
+                .doesNotContain("UPDATE post")
+                .doesNotContain("DELETE FROM post")
+                .doesNotContain("UPDATE source_snapshot")
+                .doesNotContain("DELETE FROM source_snapshot");
+    }
 }

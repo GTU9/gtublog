@@ -72,6 +72,8 @@ public class AutomationOriginApproval extends BaseEntity {
     public Long getSourceId() { return sourceId; }
     public String getOriginHost() { return originHost; }
     public Long getGroupId() { return groupId; }
+    public String getApprovedSourceUrl() { return approvedSourceUrl; }
+    public AutomationSourceType getApprovedSourceType() { return approvedSourceType; }
     public String getRationale() { return rationale; }
     public String getRevocationRationale() { return revocationRationale; }
     public boolean isActive() { return active; }
