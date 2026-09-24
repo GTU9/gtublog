@@ -5,6 +5,7 @@ import com.gtublog.analytics.PostViewCounterRepository;
 import com.gtublog.audit.AuditActorType;
 import com.gtublog.audit.AuditService;
 import com.gtublog.audit.AuditTargetType;
+import com.gtublog.automation.GeneratedMarkdownRenderer;
 import com.gtublog.automation.PublicationOutboxService;
 import com.gtublog.taxonomy.CategoryRepository;
 import com.gtublog.taxonomy.TagRepository;
@@ -30,6 +31,7 @@ public class PostService {
     private final PostQueryRepository postQueryRepository;
     private final SlugService slugService;
     private final PostHtmlSanitizer postHtmlSanitizer;
+    private final GeneratedMarkdownRenderer generatedMarkdownRenderer;
     private final AuditService auditService;
     private final PublicationOutboxService publicationOutboxService;
     private final Clock clock;
@@ -43,6 +45,7 @@ public class PostService {
             PostQueryRepository postQueryRepository,
             SlugService slugService,
             PostHtmlSanitizer postHtmlSanitizer,
+            GeneratedMarkdownRenderer generatedMarkdownRenderer,
             AuditService auditService,
             PublicationOutboxService publicationOutboxService,
             Clock clock) {
@@ -54,6 +57,7 @@ public class PostService {
         this.postQueryRepository = postQueryRepository;
         this.slugService = slugService;
         this.postHtmlSanitizer = postHtmlSanitizer;
+        this.generatedMarkdownRenderer = generatedMarkdownRenderer;
         this.auditService = auditService;
         this.publicationOutboxService = publicationOutboxService;
         this.clock = clock;
@@ -86,7 +90,13 @@ public class PostService {
         var wasPublished = post.isPublished();
         var oldSlug = post.getSlug();
         var slug = uniquePostSlug(request.slug(), request.title(), id);
-        var sanitizedContentHtml = postHtmlSanitizer.sanitize(request.contentHtml());
+        var automatedPost = postRevisionRepository.existsByPostIdAndRevisionNumberAndRevisionSource(
+                id, 1, RevisionSource.AUTOMATION);
+        var sanitizedContentHtml = automatedPost
+                ? (post.getContentMarkdown().equals(request.contentMarkdown())
+                        ? post.getContentHtml()
+                        : generatedMarkdownRenderer.render(request.contentMarkdown()))
+                : postHtmlSanitizer.sanitize(request.contentHtml());
         post.revise(slug, request.title(), request.excerpt(), request.contentMarkdown(), sanitizedContentHtml);
         postQueryRepository.replaceCategories(post.getId(), request.categoryIds());
         postQueryRepository.replaceTags(post.getId(), nullableIds(request.tagIds()));

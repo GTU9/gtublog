@@ -41,6 +41,7 @@ public class AutomationPublicationService {
     private final Clock clock;
     private final PlatformMetricsService platformMetricsService;
     private final AutomationTaxonomyService automationTaxonomyService;
+    private final GeneratedMarkdownRenderer generatedMarkdownRenderer;
 
     public AutomationPublicationService(
             AutomationTopicRepository automationTopicRepository,
@@ -53,7 +54,8 @@ public class AutomationPublicationService {
             SlugService slugService,
             Clock clock,
             PlatformMetricsService platformMetricsService,
-            AutomationTaxonomyService automationTaxonomyService) {
+            AutomationTaxonomyService automationTaxonomyService,
+            GeneratedMarkdownRenderer generatedMarkdownRenderer) {
         this.automationTopicRepository = automationTopicRepository;
         this.sourceSnapshotRepository = sourceSnapshotRepository;
         this.postRepository = postRepository;
@@ -65,6 +67,7 @@ public class AutomationPublicationService {
         this.clock = clock;
         this.platformMetricsService = platformMetricsService;
         this.automationTaxonomyService = automationTaxonomyService;
+        this.generatedMarkdownRenderer = generatedMarkdownRenderer;
     }
 
     @Transactional
@@ -224,7 +227,7 @@ public class AutomationPublicationService {
                 title,
                 excerpt,
                 contentMarkdown,
-                sanitizeMarkdown(contentMarkdown),
+                generatedMarkdownRenderer.render(contentMarkdown),
                 fingerprint));
         automationTaxonomyService.linkPost(post.getId(), taxonomy);
         post.publish(now());
@@ -272,23 +275,6 @@ public class AutomationPublicationService {
             candidate = base + "-" + sequence++;
         }
         return candidate;
-    }
-
-    private String sanitizeMarkdown(String markdown) {
-        return List.of(markdown.split("\\n{2,}")).stream()
-                .map(String::trim)
-                .filter(part -> !part.isBlank())
-                .map(part -> "<p>" + escapeHtml(part).replace("\n", "<br />") + "</p>")
-                .collect(Collectors.joining());
-    }
-
-    private String escapeHtml(String value) {
-        return value
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
     }
 
     private LocalDateTime now() {

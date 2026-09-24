@@ -326,6 +326,32 @@ img {
   padding-left: 1.3rem;
 }
 
+.content-render blockquote {
+  margin: 1.5rem 0;
+  padding: 0.1rem 1rem;
+  border-left: 4px solid #b7e3d3;
+  color: #4b5563;
+}
+
+.content-render pre {
+  overflow-x: auto;
+  padding: 1rem;
+  border-radius: 0.75rem;
+  background: #f3f7f6;
+  line-height: 1.6;
+}
+
+.content-render pre code {
+  white-space: pre;
+  word-break: normal;
+}
+
+.content-render hr {
+  margin: 1.75rem 0;
+  border: 0;
+  border-top: 1px solid #dfe6eb;
+}
+
 .intro-panel {
   background: linear-gradient(180deg, #ffffff 0, #f8fbfa 100%);
   border-color: #d6e7df;

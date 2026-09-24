@@ -39,6 +39,7 @@ dependencies {
 
     // Spring Boot does not manage these source-collection libraries.
     implementation("org.jsoup:jsoup:1.21.1")
+    implementation("org.commonmark:commonmark:0.30.0")
     implementation("com.rometools:rome:2.1.0")
     implementation("io.github.resilience4j:resilience4j-retry:2.3.0")
     implementation("io.github.resilience4j:resilience4j-ratelimiter:2.3.0")

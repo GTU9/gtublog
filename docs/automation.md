@@ -69,6 +69,12 @@ v2 terminal request는 UUID와 canonical UTF-8 JSON의 SHA-256 digest를 함께 
 
 운영 전환에서는 먼저 종료하려는 v2 작업을 끝냅니다. 이후 자동화 schedule과 **모든** worker 프로세스를 중지하고, 구 백엔드에 대한 worker claim·submit 유입을 차단합니다. 이미 처리 중인 HTTP 요청이 끝난 것을 확인하고 구 백엔드 인스턴스를 모두 제거한 뒤 새 백엔드를 배포합니다. 새 백엔드에 v2 성공 결과를 제출하는 시험에서 초안이 저장되고 `HELD`가 되는지 확인한 후 v2/v3 worker와 schedule을 재개합니다. 일시 중단 중 남은 v2 작업은 실행 deadline 전에 재개되면 새 백엔드에서 처리되어 `HELD`가 됩니다. deadline이 지나 `FAILED`로 복구된 실행은 `HELD` 전용 재시도 API를 쓰지 않고 새 v3 실행을 시작합니다. 실제 운영 중지·배포에는 별도 승인이 필요합니다.
 
+### 자동 생성 Markdown 표시
+
+새로 자동 발행되거나 보류 초안을 승인한 글은 Spring이 Markdown 구조를 HTML로 렌더링하고 정화한 결과를 `contentHtml`에 저장합니다. 생성 초안의 외부 이미지는 공개 글에 싣지 않고 대체 텍스트만 남깁니다. 기존에 발행된 글의 저장 HTML은 바꾸지 않으므로 일부 오래된 글에서는 Markdown 기호가 문단 텍스트로 보일 수 있습니다. 저장된 `contentMarkdown`과 `contentHtml`을 비교하면 이전 표현을 확인할 수 있습니다. 과거 글의 일괄 재처리는 이 배포에 포함하지 않습니다.
+
+자동 생성 글을 관리자가 수정할 때는 최초 `AUTOMATION` 리비전으로 출처를 판단합니다. Markdown을 바꾸지 않은 저장은 기존 HTML을 유지하고, Markdown을 바꾼 저장은 Spring이 같은 렌더러로 다시 정화합니다. 관리자 화면의 편집 중 미리보기는 간이 표현이며, 저장 후 다시 불러온 HTML이 공개 결과입니다. 수동 작성 글의 HTML 입력 방식은 그대로 유지됩니다.
+
 Codex SDK production 실행은 의도적으로 동결되어 있습니다. 현재 `GENERATION_CODEX_CANARY_ATTESTATION_PATH`의 v1 JSON과 `artifactDigest` 일치는 **이미지 동일성 확인일 뿐 운영 승인 근거가 아닙니다**. host mount JSON에는 발급자, 서명, 신선도, 독립 재시작 증명이 없으므로 어떤 local smoke나 candidate canary도 이를 `result: passed`로 바꾸어 worker를 활성화해서는 안 됩니다. 기존 boolean 플래그는 test process에서만 허용됩니다. 상세 결정은 [CR-002](./change-requests/CR-002-block-codex-sdk-production-adapter.md)를 따릅니다.
 
 CR-003의 `openai-responses` provider는 Codex CLI나 agent tool process를 실행하지 않는 별도 선택 경로입니다. `GENERATION_PROVIDER=openai-responses`, `OPENAI_API_KEY`, `GENERATION_OPENAI_RESPONSES_MODEL`을 외부 설정으로 모두 제공해야만 선택되며, 요청은 `tools: []`, `tool_choice: "none"`, `store: false`, strict JSON Schema를 고정합니다. 이 선택은 Spring의 발행 게이트를 우회하지 않으며 실제 운영 API 호출과 배포 smoke는 별도 release story에서 승인·검증합니다.
