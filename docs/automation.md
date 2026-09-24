@@ -87,6 +87,12 @@ v2 terminal request는 UUID와 canonical UTF-8 JSON의 SHA-256 digest를 함께 
 
 관리자는 같은 주제에 속한 서로 다른 출처 그룹 두 개의 편집상 독립성을 별도로 승인·취소할 수 있습니다. 승인에는 원래 근거와 취소 근거, revision을 남기고 실행이 새로 시작될 때 활성 승인 목록을 그 실행의 정책 기록으로 고정합니다. 실행을 같은 idempotency key로 다시 요청해도 기존 기록은 바뀌지 않으며, 새 재시도 실행은 새 시점의 정책을 기록합니다. 실행 상세에서 이 정책 기록을 확인할 수 있습니다. 그룹 쌍 승인 역시 기사 내용의 진실이나 알려지지 않은 재배포 관계를 보증하지 않습니다. 후속 자동 발행 게이트가 현재도 유효한 source-host 승인과 그룹 쌍 승인, 공유 계보 및 주장 증거를 모두 확인하기 전에는 v3 보류를 해제하지 않습니다.
 
+### 정형 출처 관찰의 보류 검증
+
+선택적인 `automation-job-v4` 계약은 자유 서술 초안 대신 `SOURCE_MENTION` 관찰과 taxonomy 선택만 제출합니다. Spring은 같은 실행에서 저장한 허용 기사 증거가 완전하고 해시가 맞는지 먼저 확인한 뒤, 두 스냅샷의 기사 텍스트에 제출 문구가 각각 실제로 나타나는지 검사합니다. 이 검사는 **문구의 존재**만 확인하며 그 문구의 사실성이나 출처의 독립성을 보증하지 않습니다. 관리자 진단에는 문구 해시와 스냅샷 ID, 판정 이유만 노출합니다.
+
+v4의 검증이 양성이어도 실행은 보류되며 게시물과 캐시 outbox를 만들지 않습니다. v4 결과에는 관리자의 기존 자유 서술 초안 override를 적용하지 않습니다. 새 작업의 기본 계약은 v3로 유지합니다. 정형 자동 공개는 현행 출처·그룹 쌍 승인 재확인, 공유 계보 차단, 원자적 중복 보호, 안전한 귀속 템플릿 검증이 완료된 후속 단계에서만 열 수 있습니다.
+
 Codex SDK production 실행은 의도적으로 동결되어 있습니다. 현재 `GENERATION_CODEX_CANARY_ATTESTATION_PATH`의 v1 JSON과 `artifactDigest` 일치는 **이미지 동일성 확인일 뿐 운영 승인 근거가 아닙니다**. host mount JSON에는 발급자, 서명, 신선도, 독립 재시작 증명이 없으므로 어떤 local smoke나 candidate canary도 이를 `result: passed`로 바꾸어 worker를 활성화해서는 안 됩니다. 기존 boolean 플래그는 test process에서만 허용됩니다. 상세 결정은 [CR-002](./change-requests/CR-002-block-codex-sdk-production-adapter.md)를 따릅니다.
 
 CR-003의 `openai-responses` provider는 Codex CLI나 agent tool process를 실행하지 않는 별도 선택 경로입니다. `GENERATION_PROVIDER=openai-responses`, `OPENAI_API_KEY`, `GENERATION_OPENAI_RESPONSES_MODEL`을 외부 설정으로 모두 제공해야만 선택되며, 요청은 `tools: []`, `tool_choice: "none"`, `store: false`, strict JSON Schema를 고정합니다. 이 선택은 Spring의 발행 게이트를 우회하지 않으며 실제 운영 API 호출과 배포 smoke는 별도 release story에서 승인·검증합니다.

@@ -1,9 +1,10 @@
-import type { GenerationProvider, GenerationRequest, GenerationSnapshot, TaxonomyCatalog, TaxonomySelection, TaxonomyTerm } from "./provider.js";
+import type { GenerationDraftResult, GenerationObservationResult, GenerationProvider, GenerationRequest, GenerationResult, GenerationSnapshot, SourceMentionObservation, TaxonomyCatalog, TaxonomySelection, TaxonomyTerm } from "./provider.js";
 import { InvalidGenerationDraftError } from "./draft-schema.js";
 import { terminalPayloadDigest, terminalSubmissionId } from "./terminal.js";
 
 export const CONTRACT_SCHEMA_VERSION = "automation-job-v2";
 export const CONTRACT_SCHEMA_VERSION_V3 = "automation-job-v3";
+export const CONTRACT_SCHEMA_VERSION_V4 = "automation-job-v4";
 
 export interface GenerationClaimRequest { readonly workerId: string; readonly supportedProviders: ReadonlyArray<string>; readonly supportedSchemaVersions: ReadonlyArray<string>; }
 export interface GenerationClaimResponse {
@@ -19,6 +20,8 @@ export interface GenerationSubmitRequest {
   readonly terminalSubmissionId: string; readonly payloadDigest: string; readonly workerId: string;
   readonly providerName: string; readonly promptVersion: string; readonly schemaVersion: string;
   readonly draft?: { readonly title: string; readonly excerpt: string; readonly contentMarkdown: string; readonly citationSnapshotIds: ReadonlyArray<number>; readonly taxonomy?: TaxonomySelection; };
+  readonly observations?: ReadonlyArray<SourceMentionObservation>;
+  readonly taxonomy?: TaxonomySelection;
   readonly failureReason?: string;
 }
 export interface GenerationSubmitResponse { readonly jobId: number; readonly status: string; readonly submittedAt: string; readonly terminalSubmissionId: string; readonly payloadDigest: string; }
@@ -51,7 +54,7 @@ interface BackendGenerationClientOptions {
 export function createWorkerRuntime({ client, provider, heartbeatIntervalMs = 30_000, generationTimeoutMs = 240_000, leaseSafetyMarginMs = 45_000, shutdownGraceMs = 20_000 }: WorkerRuntimeDependencies) {
   return {
     async runOnce(workerId: string, shutdownSignal?: AbortSignal): Promise<GenerationClaimResponse | null> {
-      const claim = await client.claim({ workerId, supportedProviders: [provider.name], supportedSchemaVersions: [CONTRACT_SCHEMA_VERSION_V3, CONTRACT_SCHEMA_VERSION] }, shutdownSignal);
+      const claim = await client.claim({ workerId, supportedProviders: [provider.name], supportedSchemaVersions: [CONTRACT_SCHEMA_VERSION_V4, CONTRACT_SCHEMA_VERSION_V3, CONTRACT_SCHEMA_VERSION] }, shutdownSignal);
       if (!claim) return null;
       assertClaimResponse(claim);
       if (claim.leaseOwner !== workerId || claim.providerName !== provider.name) throw new BackendOperationError("claim", 200, "fatal", "Generation claim identity did not match this worker.");
@@ -105,8 +108,14 @@ export function createWorkerRuntime({ client, provider, heartbeatIntervalMs = 30
       let result;
       try {
         result = await provider.generate(toGenerationRequest(claim), signal);
+        if (claim.schemaVersion === CONTRACT_SCHEMA_VERSION_V3 && !isDraftResult(result)) {
+          throw new InvalidGenerationDraftError("structure");
+        }
         if (claim.schemaVersion === CONTRACT_SCHEMA_VERSION_V3 && !validTaxonomySelection(result.taxonomy)) {
           throw new InvalidGenerationDraftError("taxonomy");
+        }
+        if (claim.schemaVersion === CONTRACT_SCHEMA_VERSION_V4 && !isObservationResult(result)) {
+          throw new InvalidGenerationDraftError("structure");
         }
       } catch (error) {
         const controlFailure: unknown = heartbeatFailure ?? (signal.aborted ? signal.reason as unknown : undefined);
@@ -130,13 +139,13 @@ export function createWorkerRuntime({ client, provider, heartbeatIntervalMs = 30
       clearTimeout(generationDeadline);
       if (heartbeatFailure) { await cleanup(); throw asError(heartbeatFailure); }
       const allowedCitationIds = new Set(claim.snapshots.map((snapshot) => snapshot.snapshotId));
-      if (!result.citationSnapshotIds.every((snapshotId) => allowedCitationIds.has(snapshotId))) { await cleanup(); throw new BackendOperationError("submit", null, "fatal", "Generated citations were outside the claimed snapshot set."); }
-      const successTerminal = withDigest({
-        terminalSubmissionId: terminalSubmissionId(), workerId, providerName: claim.providerName,
-        promptVersion: claim.promptVersion, schemaVersion: claim.schemaVersion,
-        draft: { title: result.title, excerpt: result.excerpt, contentMarkdown: result.contentMarkdown, citationSnapshotIds: result.citationSnapshotIds,
-          ...(claim.schemaVersion === CONTRACT_SCHEMA_VERSION_V3 ? { taxonomy: result.taxonomy } : {}) },
-      });
+      let successTerminal: GenerationSubmitRequest;
+      try {
+        successTerminal = successTerminalRequest(claim, result, workerId, allowedCitationIds);
+      } catch (error) {
+        await cleanup();
+        throw error;
+      }
       try {
         // Once a success payload exists it is immutable: transport ambiguity may only retry this exact payload.
         await retrySameSubmission(client, claim.jobId, successTerminal, shutdownGraceMs, () => leaseDeadline, () => heartbeatFailure);
@@ -173,7 +182,7 @@ export function createBackendGenerationClient({ baseUrl, token, requestTimeoutMs
 
 export function assertClaimResponse(value: unknown): asserts value is GenerationClaimResponse {
   const c = value as Partial<GenerationClaimResponse> | null;
-  if (!c || !positiveInteger(c.jobId) || !boundedString(c.jobKey, 1, 36) || !positiveInteger(c.runId) || !positiveInteger(c.topicId) || !boundedString(c.leaseOwner, 1, 120) || !validInstant(c.leaseExpiresAt) || !boundedString(c.providerName, 1, 64) || !boundedString(c.promptVersion, 1, 64) || !supportedSchemaVersion(c.schemaVersion) || !boundedString(c.prompt, 1, 100_000) || !Array.isArray(c.snapshots) || c.snapshots.length < 1 || c.snapshots.length > 100 || !c.snapshots.every(validSnapshot) || (c.schemaVersion === CONTRACT_SCHEMA_VERSION_V3 && !validTaxonomyCatalog(c.taxonomyCatalog))) throw new Error("Invalid generation claim payload.");
+  if (!c || !positiveInteger(c.jobId) || !boundedString(c.jobKey, 1, 36) || !positiveInteger(c.runId) || !positiveInteger(c.topicId) || !boundedString(c.leaseOwner, 1, 120) || !validInstant(c.leaseExpiresAt) || !boundedString(c.providerName, 1, 64) || !boundedString(c.promptVersion, 1, 64) || !supportedSchemaVersion(c.schemaVersion) || !boundedString(c.prompt, 1, 100_000) || !Array.isArray(c.snapshots) || c.snapshots.length < minimumSnapshotCount(c.schemaVersion) || c.snapshots.length > 100 || !c.snapshots.every(validSnapshot) || ((c.schemaVersion === CONTRACT_SCHEMA_VERSION_V3 || c.schemaVersion === CONTRACT_SCHEMA_VERSION_V4) && !validTaxonomyCatalog(c.taxonomyCatalog))) throw new Error("Invalid generation claim payload.");
 }
 export function assertHeartbeatResponse(value: unknown): asserts value is GenerationHeartbeatResponse {
   const c = value as Partial<GenerationHeartbeatResponse> | null;
@@ -186,15 +195,46 @@ export function assertSubmitResponse(value: unknown, request?: GenerationSubmitR
 }
 export function assertSubmitRequest(value: unknown): asserts value is GenerationSubmitRequest {
   const c = value as Partial<GenerationSubmitRequest> | null;
-  if (!c || typeof c.terminalSubmissionId !== "string" || !/^[0-9a-f-]{36}$/iu.test(c.terminalSubmissionId) || !/^[0-9a-f]{64}$/u.test(c.payloadDigest ?? "") || !boundedString(c.workerId, 1, 120) || !boundedString(c.providerName, 1, 64) || !boundedString(c.promptVersion, 1, 64) || !supportedSchemaVersion(c.schemaVersion) || Boolean(c.failureReason) === Boolean(c.draft)) throw new Error("Invalid generation submit payload.");
+  if (!c || typeof c.terminalSubmissionId !== "string" || !/^[0-9a-f-]{36}$/iu.test(c.terminalSubmissionId) || !/^[0-9a-f]{64}$/u.test(c.payloadDigest ?? "") || !boundedString(c.workerId, 1, 120) || !boundedString(c.providerName, 1, 64) || !boundedString(c.promptVersion, 1, 64) || !supportedSchemaVersion(c.schemaVersion)) throw new Error("Invalid generation submit payload.");
+  const hasFailure = c.failureReason !== undefined;
+  const hasV2V3Draft = c.draft !== undefined;
+  const hasV4Success = c.observations !== undefined || c.taxonomy !== undefined;
+  if (c.schemaVersion === CONTRACT_SCHEMA_VERSION_V4) {
+    if (hasFailure === hasV4Success || hasV2V3Draft) throw new Error("Invalid generation submit payload.");
+  } else if (hasFailure === hasV2V3Draft || hasV4Success) throw new Error("Invalid generation submit payload.");
   if (c.failureReason !== undefined && !boundedString(c.failureReason, 1, 500)) throw new Error("Invalid generation failure reason.");
   if (c.draft && (!boundedString(c.draft.title, 1, 300) || !boundedString(c.draft.excerpt, 1, 1_000) || !boundedString(c.draft.contentMarkdown, 1, 100_000) || !Array.isArray(c.draft.citationSnapshotIds) || c.draft.citationSnapshotIds.length < 1 || c.draft.citationSnapshotIds.length > 100 || !c.draft.citationSnapshotIds.every(positiveInteger) || new Set(c.draft.citationSnapshotIds).size !== c.draft.citationSnapshotIds.length)) throw new Error("Invalid generation draft payload.");
   if (c.draft && c.schemaVersion === CONTRACT_SCHEMA_VERSION_V3 && !validTaxonomySelection(c.draft.taxonomy)) throw new Error("Invalid generation draft taxonomy.");
+  if (c.draft && c.schemaVersion === CONTRACT_SCHEMA_VERSION && c.draft.taxonomy !== undefined) throw new Error("Invalid generation draft taxonomy.");
+  if (c.schemaVersion === CONTRACT_SCHEMA_VERSION_V4 && c.failureReason === undefined) {
+    if (!validObservations(c.observations) || !validTaxonomySelection(c.taxonomy)) throw new Error("Invalid generation observations payload.");
+  }
   const { payloadDigest, ...unsigned } = c as GenerationSubmitRequest;
   if (terminalPayloadDigest(unsigned) !== payloadDigest) throw new Error("Generation terminal payload digest is invalid.");
 }
 
 function withDigest(request: Omit<GenerationSubmitRequest, "payloadDigest">): GenerationSubmitRequest { return { ...request, payloadDigest: terminalPayloadDigest(request) }; }
+function successTerminalRequest(claim: GenerationClaimResponse, result: GenerationResult, workerId: string, allowedCitationIds: ReadonlySet<number>): GenerationSubmitRequest {
+  if (claim.schemaVersion === CONTRACT_SCHEMA_VERSION_V4) {
+    if (!isObservationResult(result)) throw new InvalidGenerationDraftError("structure");
+    const referencedIds = result.observations.flatMap((observation) => observation.citationSnapshotIds);
+    if (!referencedIds.every((snapshotId) => allowedCitationIds.has(snapshotId))) throw new BackendOperationError("submit", null, "fatal", "Generated citations were outside the claimed snapshot set.");
+    return withDigest({
+      terminalSubmissionId: terminalSubmissionId(), workerId, providerName: claim.providerName,
+      promptVersion: claim.promptVersion, schemaVersion: claim.schemaVersion,
+      observations: result.observations,
+      taxonomy: result.taxonomy,
+    });
+  }
+  if (!isDraftResult(result)) throw new InvalidGenerationDraftError("structure");
+  if (!result.citationSnapshotIds.every((snapshotId) => allowedCitationIds.has(snapshotId))) throw new BackendOperationError("submit", null, "fatal", "Generated citations were outside the claimed snapshot set.");
+  return withDigest({
+    terminalSubmissionId: terminalSubmissionId(), workerId, providerName: claim.providerName,
+    promptVersion: claim.promptVersion, schemaVersion: claim.schemaVersion,
+    draft: { title: result.title, excerpt: result.excerpt, contentMarkdown: result.contentMarkdown, citationSnapshotIds: result.citationSnapshotIds,
+      ...(claim.schemaVersion === CONTRACT_SCHEMA_VERSION_V3 ? { taxonomy: result.taxonomy } : {}) },
+  });
+}
 async function retrySameSubmission(client: BackendGenerationClient, jobId: number, request: GenerationSubmitRequest, deadlineMs: number, leaseDeadline: () => number, heartbeatFailure: () => unknown): Promise<void> {
   const shutdownDeadline = performance.now() + deadlineMs; let delay = 250;
   while (true) {
@@ -239,7 +279,8 @@ export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> 
 function asError(value: unknown): Error { return value instanceof Error ? value : new Error("Operation aborted."); }
 function toGenerationRequest(claim: GenerationClaimResponse): GenerationRequest { return { jobId: claim.jobKey, runId: claim.runId, topicId: claim.topicId, promptVersion: claim.promptVersion, schemaVersion: claim.schemaVersion, snapshots: claim.snapshots, prompt: claim.prompt, ...(claim.taxonomyCatalog ? { taxonomyCatalog: claim.taxonomyCatalog } : {}) }; }
 
-function supportedSchemaVersion(value: unknown): value is string { return value === CONTRACT_SCHEMA_VERSION || value === CONTRACT_SCHEMA_VERSION_V3; }
+function supportedSchemaVersion(value: unknown): value is string { return value === CONTRACT_SCHEMA_VERSION || value === CONTRACT_SCHEMA_VERSION_V3 || value === CONTRACT_SCHEMA_VERSION_V4; }
+function minimumSnapshotCount(schemaVersion: string): number { return schemaVersion === CONTRACT_SCHEMA_VERSION_V4 ? 2 : 1; }
 function validTaxonomyTerm(value: unknown): value is TaxonomyTerm {
   if (!value || typeof value !== "object") return false;
   const term = value as Partial<TaxonomyTerm>;
@@ -259,4 +300,23 @@ function validTaxonomySelection(value: unknown): value is TaxonomySelection {
   const selection = value as Partial<TaxonomySelection>;
   return positiveInteger(selection.categoryId) && Array.isArray(selection.tagIds)
     && selection.tagIds.length >= 1 && selection.tagIds.length <= 5 && selection.tagIds.every(positiveInteger);
+}
+function validObservations(value: unknown): value is ReadonlyArray<SourceMentionObservation> {
+  return Array.isArray(value) && value.length >= 1 && value.length <= 3 && value.every((observation) => {
+    if (!observation || typeof observation !== "object") return false;
+    const candidate = observation as Partial<SourceMentionObservation>;
+    return candidate.kind === "SOURCE_MENTION"
+      && boundedString(candidate.literal, 20, 160)
+      && !/[<>\p{C}]/u.test(candidate.literal)
+      && Array.isArray(candidate.citationSnapshotIds)
+      && candidate.citationSnapshotIds.length === 2
+      && candidate.citationSnapshotIds.every(positiveInteger)
+      && new Set(candidate.citationSnapshotIds).size === 2;
+  });
+}
+function isDraftResult(result: GenerationResult): result is GenerationDraftResult {
+  return "citationSnapshotIds" in result;
+}
+function isObservationResult(result: GenerationResult): result is GenerationObservationResult {
+  return "observations" in result;
 }

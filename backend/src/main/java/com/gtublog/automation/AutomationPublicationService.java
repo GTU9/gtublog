@@ -50,6 +50,7 @@ public class AutomationPublicationService {
     private final AutomationPublicationDecisionRepository automationPublicationDecisionRepository;
     private final AutomationSourceRelationDiagnosticRepository automationSourceRelationDiagnosticRepository;
     private final ObjectMapper objectMapper;
+    private final StructuredEvidenceShadowVerifier structuredEvidenceShadowVerifier;
 
     public AutomationPublicationService(
             AutomationTopicRepository automationTopicRepository,
@@ -66,7 +67,8 @@ public class AutomationPublicationService {
             GeneratedMarkdownRenderer generatedMarkdownRenderer,
             AutomationPublicationDecisionRepository automationPublicationDecisionRepository,
             AutomationSourceRelationDiagnosticRepository automationSourceRelationDiagnosticRepository,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            StructuredEvidenceShadowVerifier structuredEvidenceShadowVerifier) {
         this.automationTopicRepository = automationTopicRepository;
         this.sourceSnapshotRepository = sourceSnapshotRepository;
         this.postRepository = postRepository;
@@ -82,6 +84,7 @@ public class AutomationPublicationService {
         this.automationPublicationDecisionRepository = automationPublicationDecisionRepository;
         this.automationSourceRelationDiagnosticRepository = automationSourceRelationDiagnosticRepository;
         this.objectMapper = objectMapper;
+        this.structuredEvidenceShadowVerifier = structuredEvidenceShadowVerifier;
     }
 
     @Transactional
@@ -91,6 +94,9 @@ public class AutomationPublicationService {
             GenerationJobSubmitRequest request,
             GenerationJobClaimResponse.TaxonomyCatalog catalog) {
         run.requireActive(now());
+        if ("automation-job-v4".equals(job.getSchemaVersion())) {
+            return processStructuredEvidenceShadow(run, request, catalog);
+        }
         if (!"automation-job-v3".equals(job.getSchemaVersion())) {
             run.markHeld(AutomationHoldReason.TAXONOMY_SELECTION_MISSING, now());
             persistPublicationDecision(run, List.of(), List.of(), "held", AutomationHoldReason.TAXONOMY_SELECTION_MISSING, "TAXONOMY_MISSING");
@@ -145,6 +151,34 @@ public class AutomationPublicationService {
         persistPublicationDecision(run, citedSnapshots, relationSnapshots, "held",
                 AutomationHoldReason.INSUFFICIENT_ORIGINS, detailReason, relations);
         recordDecision(run, "held", detailReason.toLowerCase(java.util.Locale.ROOT));
+        return PublicationDecision.held(AutomationHoldReason.INSUFFICIENT_ORIGINS);
+    }
+
+    private PublicationDecision processStructuredEvidenceShadow(
+            AutomationRun run,
+            GenerationJobSubmitRequest request,
+            GenerationJobClaimResponse.TaxonomyCatalog catalog) {
+        var taxonomyProblem = automationTaxonomyService.validateSelection(catalog, request.taxonomy());
+        if (taxonomyProblem != null) {
+            run.markHeld(taxonomyProblem, now());
+            persistStructuredEvidenceDecision(run, "TAXONOMY_INVALID", false, List.of(), taxonomyProblem);
+            recordDecision(run, "held", "structured_taxonomy_invalid");
+            return PublicationDecision.held(taxonomyProblem);
+        }
+        var verification = structuredEvidenceShadowVerifier.verify(run.getId(), request.observations());
+        run.markHeld(AutomationHoldReason.INSUFFICIENT_ORIGINS, now());
+        var detailReason = verification.accepted()
+                ? "STRUCTURED_EVIDENCE_SHADOW_ACCEPTED"
+                : "STRUCTURED_EVIDENCE_SHADOW_REJECTED";
+        persistStructuredEvidenceDecision(
+                run,
+                detailReason,
+                verification.accepted(),
+                verification.diagnosticPayload(),
+                AutomationHoldReason.INSUFFICIENT_ORIGINS);
+        recordDecision(run, "held", verification.accepted()
+                ? "structured_evidence_shadow_accepted"
+                : "structured_evidence_shadow_rejected");
         return PublicationDecision.held(AutomationHoldReason.INSUFFICIENT_ORIGINS);
     }
 
@@ -349,6 +383,42 @@ public class AutomationPublicationService {
                 holdReason,
                 detailReason,
                 decisionJson(run, citedSnapshots, relationSnapshots, relations, outcome, holdReason, detailReason)));
+    }
+
+    private void persistStructuredEvidenceDecision(
+            AutomationRun run,
+            String detailReason,
+            boolean accepted,
+            List<Map<String, Object>> diagnostics,
+            String holdReason) {
+        automationPublicationDecisionRepository.deleteByRunId(run.getId());
+        automationSourceRelationDiagnosticRepository.deleteByRunId(run.getId());
+        automationPublicationDecisionRepository.save(AutomationPublicationDecision.record(
+                run.getId(),
+                "held",
+                holdReason,
+                detailReason,
+                structuredEvidenceDecisionJson(run, detailReason, accepted, diagnostics, holdReason)));
+    }
+
+    private String structuredEvidenceDecisionJson(
+            AutomationRun run,
+            String detailReason,
+            boolean accepted,
+            List<Map<String, Object>> diagnostics,
+            String holdReason) {
+        var payload = new LinkedHashMap<String, Object>();
+        payload.put("runId", run.getId());
+        payload.put("outcome", "held");
+        payload.put("holdReason", holdReason);
+        payload.put("detailReason", detailReason);
+        payload.put("accepted", accepted);
+        payload.put("observations", diagnostics);
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Could not serialize structured evidence publication decision.", exception);
+        }
     }
 
     private String decisionJson(

@@ -73,18 +73,87 @@ public class GenerationWorkerController {
 
     private void requireKnownSubmitFields(JsonNode body) {
         requireObjectFields(body, Set.of("terminalSubmissionId", "payloadDigest", "workerId",
-                "providerName", "promptVersion", "schemaVersion", "draft", "failureReason"));
-        if (body.has("draft") == body.has("failureReason")) {
-            throw new IllegalArgumentException("Exactly one of draft or failureReason is required.");
+                "providerName", "promptVersion", "schemaVersion", "draft", "observations", "taxonomy", "failureReason"));
+        var schemaVersion = body.path("schemaVersion").asText();
+        if ("automation-job-v4".equals(schemaVersion)) {
+            requireKnownV4SubmitFields(body);
+            return;
         }
-        var draft = body.path("draft");
-        if (!draft.isMissingNode() && !draft.isNull()) {
-            boolean v3 = "automation-job-v3".equals(body.path("schemaVersion").asText());
+        boolean hasDraft = hasNonNull(body, "draft");
+        boolean hasObservations = hasNonNull(body, "observations");
+        boolean hasFailure = hasNonBlankText(body, "failureReason");
+        if ((hasDraft ? 1 : 0) + (hasObservations ? 1 : 0) + (hasFailure ? 1 : 0) != 1) {
+            throw new IllegalArgumentException("Exactly one terminal success or failure payload is required.");
+        }
+        if (hasFailure && (hasNonNull(body, "taxonomy") || hasNonNull(body, "observations") || hasNonNull(body, "draft"))) {
+            throw new IllegalArgumentException("A failure submission cannot include success payload fields.");
+        }
+        if (hasDraft) {
+            if ("automation-job-v4".equals(schemaVersion)) {
+                throw new IllegalArgumentException("A v4 submission cannot include a draft.");
+            }
+            var draft = body.path("draft");
+            boolean v3 = "automation-job-v3".equals(schemaVersion);
             requireObjectFields(draft, v3
                     ? Set.of("title", "excerpt", "contentMarkdown", "citationSnapshotIds", "taxonomy")
                     : Set.of("title", "excerpt", "contentMarkdown", "citationSnapshotIds"));
             if (v3) {
                 requireObjectFields(draft.path("taxonomy"), Set.of("categoryId", "tagIds"));
+            }
+        }
+        if (hasObservations) {
+            if (!"automation-job-v4".equals(schemaVersion)) {
+                throw new IllegalArgumentException("Structured observations are only accepted for v4 submissions.");
+            }
+            if (!body.path("observations").isArray()) {
+                throw new IllegalArgumentException("The worker submission contains an invalid observations array.");
+            }
+            for (var observation : body.path("observations")) {
+                requireObjectFields(observation, Set.of("kind", "literal", "citationSnapshotIds"));
+            }
+            requireObjectFields(body.path("taxonomy"), Set.of("categoryId", "tagIds"));
+        } else if (hasNonNull(body, "taxonomy")) {
+            throw new IllegalArgumentException("Top-level taxonomy is only accepted with v4 observations.");
+        }
+    }
+
+    private void requireKnownV4SubmitFields(JsonNode body) {
+        boolean hasObservations = body.has("observations");
+        boolean hasTaxonomy = body.has("taxonomy");
+        boolean hasFailure = body.has("failureReason");
+        if (body.has("draft")) {
+            throw new IllegalArgumentException("A v4 submission cannot include a draft field.");
+        }
+        if (hasFailure) {
+            if (hasObservations || hasTaxonomy) {
+                throw new IllegalArgumentException("A v4 failure submission cannot include success payload fields.");
+            }
+            if (body.path("failureReason").isNull() || body.path("failureReason").asText().isBlank()) {
+                throw new IllegalArgumentException("A v4 failure submission must include a failure reason.");
+            }
+            return;
+        }
+        if (!hasObservations || !hasTaxonomy) {
+            throw new IllegalArgumentException("A v4 success submission must include observations and taxonomy.");
+        }
+        if (body.path("observations").isNull() || !body.path("observations").isArray()) {
+            throw new IllegalArgumentException("The worker submission contains an invalid observations array.");
+        }
+        for (var observation : body.path("observations")) {
+            requireObjectFields(observation, Set.of("kind", "literal", "citationSnapshotIds"));
+            requireUniqueCitationSnapshotIds(observation.path("citationSnapshotIds"));
+        }
+        requireObjectFields(body.path("taxonomy"), Set.of("categoryId", "tagIds"));
+    }
+
+    private void requireUniqueCitationSnapshotIds(JsonNode citationSnapshotIds) {
+        if (citationSnapshotIds == null || !citationSnapshotIds.isArray()) {
+            throw new IllegalArgumentException("The worker submission contains invalid citation snapshot IDs.");
+        }
+        var ids = new java.util.HashSet<Long>();
+        for (var id : citationSnapshotIds) {
+            if (!id.canConvertToLong() || !ids.add(id.longValue())) {
+                throw new IllegalArgumentException("The worker submission contains duplicate citation snapshot IDs.");
             }
         }
     }
@@ -93,5 +162,13 @@ public class GenerationWorkerController {
         if (object == null || !object.isObject() || object.propertyNames().stream().anyMatch(name -> !allowed.contains(name))) {
             throw new IllegalArgumentException("The worker submission contains an invalid object or unknown field.");
         }
+    }
+
+    private boolean hasNonNull(JsonNode body, String fieldName) {
+        return body.has(fieldName) && !body.path(fieldName).isNull();
+    }
+
+    private boolean hasNonBlankText(JsonNode body, String fieldName) {
+        return body.has(fieldName) && !body.path(fieldName).isNull() && !body.path(fieldName).asText().isBlank();
     }
 }

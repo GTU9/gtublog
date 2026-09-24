@@ -1,0 +1,19 @@
+{
+  "terminalSubmissionId": "44444444-4444-4444-8444-444444444444",
+  "payloadDigest": "8a48417b9245ca2459eb0bb2d8d72f912d68491e3b2abdc0a34525b09081fb5f",
+  "workerId": "worker-fixture",
+  "providerName": "codex-sdk",
+  "promptVersion": "prompt-v1",
+  "schemaVersion": "automation-job-v4",
+  "observations": [
+    {
+      "kind": "SOURCE_MENTION",
+      "literal": "Structured evidence mention shared by two source snapshots.",
+      "citationSnapshotIds": [1, 2]
+    }
+  ],
+  "taxonomy": {
+    "categoryId": 10,
+    "tagIds": [20]
+  }
+}

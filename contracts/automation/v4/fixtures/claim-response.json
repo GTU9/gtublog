@@ -1,0 +1,38 @@
+{
+  "jobId": 14,
+  "jobKey": "11111111-1111-4111-8111-111111111114",
+  "runId": 140,
+  "topicId": 141,
+  "leaseOwner": "worker-fixture",
+  "leaseExpiresAt": "2026-07-01T12:10:00Z",
+  "providerName": "codex-sdk",
+  "promptVersion": "prompt-v1",
+  "schemaVersion": "automation-job-v4",
+  "prompt": "Create source mention observations from the supplied snapshots.",
+  "taxonomyCatalog": {
+    "categories": [{ "id": 10, "slug": "technology", "name": "Technology" }],
+    "tags": [{ "id": 20, "slug": "automation", "name": "Automation" }]
+  },
+  "snapshots": [
+    {
+      "snapshotId": 1,
+      "sourceUrl": "https://alpha.example.test/source",
+      "canonicalUrl": "https://alpha.example.test/source",
+      "title": "Alpha fixture source",
+      "originHost": "alpha.example.test",
+      "bodyExcerpt": "Structured evidence mention shared by two source snapshots.",
+      "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "retrievedAt": "2026-07-01T12:00:00Z"
+    },
+    {
+      "snapshotId": 2,
+      "sourceUrl": "https://beta.example.test/source",
+      "canonicalUrl": "https://beta.example.test/source",
+      "title": "Beta fixture source",
+      "originHost": "beta.example.test",
+      "bodyExcerpt": "Structured evidence mention shared by two source snapshots.",
+      "contentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "retrievedAt": "2026-07-01T12:00:30Z"
+    }
+  ]
+}

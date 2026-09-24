@@ -1,6 +1,6 @@
 import { Codex } from "@openai/codex-sdk";
 
-import { generationDraftJsonSchema, generationDraftJsonSchemaV3, validateGenerationDraft } from "./draft-schema.js";
+import { generationDraftJsonSchema, generationDraftJsonSchemaV3, generationObservationJsonSchemaV4, validateGenerationDraft } from "./draft-schema.js";
 import type { GenerationProvider, GenerationRequest, GenerationResult } from "./provider.js";
 
 type CodexFactory = () => CodexLike;
@@ -50,9 +50,23 @@ export function createCodexGenerationProvider(
         webSearchMode: "disabled",
         modelReasoningEffort: "low",
       });
+      const structuredInstruction = request.schemaVersion === "automation-job-v4"
+        ? [
+            request.prompt,
+            "",
+            `Choose taxonomy IDs only from this approved catalog: ${JSON.stringify(request.taxonomyCatalog)}`,
+            "Return JSON with only top-level observations and taxonomy.",
+            "Each observation must have kind SOURCE_MENTION, a 20-160 character literal copied from source text, and exactly two different citationSnapshotIds.",
+            "Do not return title, excerpt, contentMarkdown, markdown, HTML, or prose.",
+            "반드시 JSON만 반환하세요.",
+          ].join("\n")
+        : `${request.prompt}\n\n${request.schemaVersion === "automation-job-v3" ? `Choose taxonomy IDs only from this approved catalog: ${JSON.stringify(request.taxonomyCatalog)}\n` : ""}반드시 JSON만 반환하세요.`;
+      const outputSchema = request.schemaVersion === "automation-job-v4"
+        ? generationObservationJsonSchemaV4
+        : request.schemaVersion === "automation-job-v3" ? generationDraftJsonSchemaV3 : generationDraftJsonSchema;
       const turn = await thread.run(
-        `${request.prompt}\n\n${request.schemaVersion === "automation-job-v3" ? `Choose taxonomy IDs only from this approved catalog: ${JSON.stringify(request.taxonomyCatalog)}\n` : ""}반드시 JSON만 반환하세요.`,
-        { outputSchema: request.schemaVersion === "automation-job-v3" ? generationDraftJsonSchemaV3 : generationDraftJsonSchema, signal },
+        structuredInstruction,
+        { outputSchema, signal },
       );
       const parsed = JSON.parse(turn.finalResponse) as unknown;
       return validateGenerationDraft(parsed, "codex-sdk", request.schemaVersion);
