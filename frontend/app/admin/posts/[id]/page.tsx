@@ -185,7 +185,9 @@ export default function AdminPostDetailPage() {
             mode="edit"
             saving={saving}
             previewHtml={previewHtml}
-            message="관리자 인증은 메모리 기반 액세스 토큰과 중앙화된 갱신 흐름으로 유지됩니다."
+            message={revisions.some((revision) => revision.revisionSource === "AUTOMATION")
+              ? "자동 생성 글의 편집 중 미리보기는 간이 표현입니다. 저장 후 다시 불러온 HTML을 최종 결과로 확인하세요."
+              : "관리자 인증은 메모리 기반 액세스 토큰과 중앙화된 갱신 흐름으로 유지됩니다."}
             onSubmit={handleSubmit}
             onAction={(action) => void handleAction(action)}
             onRestoreRevision={(revisionNumber) => void handleRestoreRevision(revisionNumber)}
