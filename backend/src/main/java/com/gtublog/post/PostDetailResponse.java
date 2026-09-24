@@ -17,5 +17,6 @@ public record PostDetailResponse(
         long viewCount,
         List<TaxonomyItemResponse> categories,
         List<TaxonomyItemResponse> tags,
+        List<PostCitationResponse> citations,
         List<PostSummaryResponse> relatedPosts) {
 }

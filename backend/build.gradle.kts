@@ -1,8 +1,11 @@
 plugins {
     java
-    id("org.springframework.boot") version "4.1.0"
+    id("org.springframework.boot") version "4.1.1"
     id("io.spring.dependency-management") version "1.1.7"
 }
+
+// Spring Boot 4.1.1 still manages a Tomcat release affected by 2026 security advisories.
+extra["tomcat.version"] = "11.0.26"
 
 group = "com.gtublog"
 version = "0.1.0-SNAPSHOT"
@@ -36,6 +39,7 @@ dependencies {
 
     // Spring Boot does not manage these source-collection libraries.
     implementation("org.jsoup:jsoup:1.21.1")
+    implementation("org.commonmark:commonmark:0.30.0")
     implementation("com.rometools:rome:2.1.0")
     implementation("io.github.resilience4j:resilience4j-retry:2.3.0")
     implementation("io.github.resilience4j:resilience4j-ratelimiter:2.3.0")

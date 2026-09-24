@@ -44,6 +44,7 @@
 - `AUTH_PRIVATE_KEY_PEM`
 - `AUTOMATION_WORKER_SHARED_TOKEN`
 - `AUTOMATION_REVALIDATION_SHARED_SECRET`
+- `GTUBLOG_REVALIDATION_SHARED_SECRET` (Next 서버 전용; Compose에서는 위 값과 동일하게 주입)
 - `ADMIN_BOOTSTRAP_USERNAME`
 - `ADMIN_BOOTSTRAP_PASSWORD`
 - `MYSQL_PASSWORD`
@@ -74,6 +75,7 @@
 - `AUTH_ALLOWED_ORIGIN`은 공개 오리진과 정확히 일치
 - 브라우저에서 쓰는 `NEXT_PUBLIC_GTUBLOG_APPLICATION_API_BASE_URL`은 same-origin 유지를 위해 `/api/v1` 같은 상대 경로를 권장
 - Next 서버 런타임이 Spring 공개/관리자 API를 직접 호출해야 하므로 `GTUBLOG_PUBLIC_API_BASE_URL`, `GTUBLOG_APPLICATION_API_BASE_URL`은 보통 내부 네트워크 절대 주소를 사용
+- Spring과 Next는 같은 32바이트 이상의 고엔트로피 revalidation secret을 외부에서 받는다. placeholder나 누락 값은 전달을 실패 처리하며, `NEXT_PUBLIC_*` 변수에 이 값을 넣지 않는다.
 - `AUTOMATION_COLLECTION_ALLOWED_PRIVATE_HOSTS`는 승인된 격리망 요구가 없는 한 비워둘 것
 - `GENERATION_PROVIDER`는 canary attestation 조건이 충족되기 전까지 Codex production 모드로 전환하지 말 것
 

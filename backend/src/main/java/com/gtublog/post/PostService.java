@@ -5,9 +5,12 @@ import com.gtublog.analytics.PostViewCounterRepository;
 import com.gtublog.audit.AuditActorType;
 import com.gtublog.audit.AuditService;
 import com.gtublog.audit.AuditTargetType;
+import com.gtublog.automation.GeneratedMarkdownRenderer;
+import com.gtublog.automation.PublicationOutboxService;
 import com.gtublog.taxonomy.CategoryRepository;
 import com.gtublog.taxonomy.TagRepository;
 import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -28,7 +31,9 @@ public class PostService {
     private final PostQueryRepository postQueryRepository;
     private final SlugService slugService;
     private final PostHtmlSanitizer postHtmlSanitizer;
+    private final GeneratedMarkdownRenderer generatedMarkdownRenderer;
     private final AuditService auditService;
+    private final PublicationOutboxService publicationOutboxService;
     private final Clock clock;
 
     public PostService(
@@ -40,7 +45,9 @@ public class PostService {
             PostQueryRepository postQueryRepository,
             SlugService slugService,
             PostHtmlSanitizer postHtmlSanitizer,
+            GeneratedMarkdownRenderer generatedMarkdownRenderer,
             AuditService auditService,
+            PublicationOutboxService publicationOutboxService,
             Clock clock) {
         this.postRepository = postRepository;
         this.postRevisionRepository = postRevisionRepository;
@@ -50,7 +57,9 @@ public class PostService {
         this.postQueryRepository = postQueryRepository;
         this.slugService = slugService;
         this.postHtmlSanitizer = postHtmlSanitizer;
+        this.generatedMarkdownRenderer = generatedMarkdownRenderer;
         this.auditService = auditService;
+        this.publicationOutboxService = publicationOutboxService;
         this.clock = clock;
     }
 
@@ -78,12 +87,21 @@ public class PostService {
     public PostDetailResponse update(Long id, PostUpsertRequest request) {
         requireExistingTaxonomy(request.categoryIds(), request.tagIds());
         var post = postRepository.findById(id).orElseThrow();
+        var wasPublished = post.isPublished();
+        var oldSlug = post.getSlug();
         var slug = uniquePostSlug(request.slug(), request.title(), id);
-        var sanitizedContentHtml = postHtmlSanitizer.sanitize(request.contentHtml());
+        var automatedPost = postRevisionRepository.existsByPostIdAndRevisionNumberAndRevisionSource(
+                id, 1, RevisionSource.AUTOMATION);
+        var sanitizedContentHtml = automatedPost
+                ? (post.getContentMarkdown().equals(request.contentMarkdown())
+                        ? post.getContentHtml()
+                        : generatedMarkdownRenderer.render(request.contentMarkdown()))
+                : postHtmlSanitizer.sanitize(request.contentHtml());
         post.revise(slug, request.title(), request.excerpt(), request.contentMarkdown(), sanitizedContentHtml);
         postQueryRepository.replaceCategories(post.getId(), request.categoryIds());
         postQueryRepository.replaceTags(post.getId(), nullableIds(request.tagIds()));
         createRevision(post, RevisionSource.MANUAL_EDIT, request.revisionNote());
+        enqueuePublicMutationIfNeeded(post, "POST_UPDATED", wasPublished, oldSlug);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.POST, post.getId().toString(), "POST_UPDATED", Map.of("slug", slug));
         return detail(post.getId(), false);
     }
@@ -91,7 +109,10 @@ public class PostService {
     @Transactional
     public PostDetailResponse publish(Long id) {
         var post = postRepository.findById(id).orElseThrow();
+        var wasPublished = post.isPublished();
+        var oldSlug = post.getSlug();
         post.publish(now());
+        enqueuePublicMutationIfNeeded(post, "POST_PUBLISHED", wasPublished, oldSlug);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.POST, post.getId().toString(), "POST_PUBLISHED", Map.of("slug", post.getSlug()));
         return detail(post.getId(), false);
     }
@@ -99,7 +120,10 @@ public class PostService {
     @Transactional
     public PostDetailResponse archive(Long id) {
         var post = postRepository.findById(id).orElseThrow();
+        var wasPublished = post.isPublished();
+        var oldSlug = post.getSlug();
         post.archive(now());
+        enqueuePublicMutationIfNeeded(post, "POST_ARCHIVED", wasPublished, oldSlug);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.POST, post.getId().toString(), "POST_ARCHIVED", Map.of("slug", post.getSlug()));
         return detail(post.getId(), false);
     }
@@ -107,7 +131,10 @@ public class PostService {
     @Transactional
     public PostDetailResponse delete(Long id) {
         var post = postRepository.findById(id).orElseThrow();
+        var wasPublished = post.isPublished();
+        var oldSlug = post.getSlug();
         post.markDeleted(now());
+        enqueuePublicMutationIfNeeded(post, "POST_DELETED", wasPublished, oldSlug);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.POST, post.getId().toString(), "POST_DELETED", Map.of("slug", post.getSlug()));
         return detail(post.getId(), false);
     }
@@ -124,10 +151,13 @@ public class PostService {
     @Transactional
     public PostDetailResponse restoreRevision(Long postId, int revisionNumber) {
         var post = postRepository.findById(postId).orElseThrow();
+        var wasPublished = post.isPublished();
+        var oldSlug = post.getSlug();
         var revision = postRevisionRepository.findByPostIdAndRevisionNumber(postId, revisionNumber).orElseThrow();
         var sanitizedContentHtml = postHtmlSanitizer.sanitize(revision.getContentHtml());
         post.revise(post.getSlug(), revision.getTitle(), revision.getExcerpt(), revision.getContentMarkdown(), sanitizedContentHtml);
         createRevision(post, RevisionSource.MANUAL_RESTORE, "Revision " + revisionNumber + " restored.");
+        enqueuePublicMutationIfNeeded(post, "POST_REVISION_RESTORED", wasPublished, oldSlug);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.POST, post.getId().toString(), "POST_REVISION_RESTORED", Map.of("revisionNumber", revisionNumber));
         return detail(post.getId(), false);
     }
@@ -135,8 +165,14 @@ public class PostService {
     @Transactional(readOnly = true)
     public PostPageResponse<PostSummaryResponse> adminPosts(int page, int size) {
         var bounded = boundedSize(size);
-        var result = postRepository.findAllActive(PageRequest.of(page, bounded));
-        return toPageResponse(result.getContent().stream().map(this::toSummary).toList(), page, bounded, result.getTotalElements(), result.getTotalPages());
+        var normalizedPage = validatedPage(page, bounded);
+        var result = postRepository.findAllActive(PageRequest.of(normalizedPage, bounded));
+        return toPageResponse(result.getContent().stream().map(this::toSummary).toList(), normalizedPage, bounded, result.getTotalElements(), result.getTotalPages());
+    }
+
+    @Transactional(readOnly = true)
+    public PostStatsResponse adminStats() {
+        return postQueryRepository.postStats();
     }
 
     @Transactional(readOnly = true)
@@ -173,40 +209,55 @@ public class PostService {
     @Transactional(readOnly = true)
     public PostPageResponse<PostSummaryResponse> publicPosts(int page, int size) {
         var bounded = boundedSize(size);
-        var result = postRepository.findPublished(PageRequest.of(page, bounded));
-        return toPageResponse(result.getContent().stream().map(this::toSummary).toList(), page, bounded, result.getTotalElements(), result.getTotalPages());
+        var normalizedPage = validatedPage(page, bounded);
+        var result = postRepository.findPublished(PageRequest.of(normalizedPage, bounded));
+        return toPageResponse(result.getContent().stream().map(this::toSummary).toList(), normalizedPage, bounded, result.getTotalElements(), result.getTotalPages());
     }
 
     @Transactional(readOnly = true)
     public PostPageResponse<PostSummaryResponse> search(String query, int page, int size) {
         var bounded = boundedSize(size);
-        var offset = page * bounded;
+        var normalizedPage = validatedPage(page, bounded);
+        var offset = offset(normalizedPage, bounded);
         var projections = postQueryRepository.searchPublished(query, bounded, offset);
         var total = postQueryRepository.countSearchPublished(query);
-        return summarizePage(projections, page, bounded, total);
+        return summarizePage(projections, normalizedPage, bounded, total);
     }
 
     @Transactional(readOnly = true)
     public PostPageResponse<PostSummaryResponse> categoryPosts(String slug, int page, int size) {
         var bounded = boundedSize(size);
-        var offset = page * bounded;
+        var normalizedPage = validatedPage(page, bounded);
+        var offset = offset(normalizedPage, bounded);
         var projections = postQueryRepository.findPublishedByCategory(slug, bounded, offset);
         var total = postQueryRepository.countPublishedByCategory(slug);
-        return summarizePage(projections, page, bounded, total);
+        return summarizePage(projections, normalizedPage, bounded, total);
     }
 
     @Transactional(readOnly = true)
     public PostPageResponse<PostSummaryResponse> tagPosts(String slug, int page, int size) {
         var bounded = boundedSize(size);
-        var offset = page * bounded;
+        var normalizedPage = validatedPage(page, bounded);
+        var offset = offset(normalizedPage, bounded);
         var projections = postQueryRepository.findPublishedByTag(slug, bounded, offset);
         var total = postQueryRepository.countPublishedByTag(slug);
-        return summarizePage(projections, page, bounded, total);
+        return summarizePage(projections, normalizedPage, bounded, total);
     }
 
     @Transactional(readOnly = true)
     public List<PostArchiveEntryResponse> archive() {
         return postQueryRepository.archiveEntries();
+    }
+
+    @Transactional(readOnly = true)
+    public PostPageResponse<PostSummaryResponse> archiveMonth(int year, int month, int page, int size) {
+        var bounded = boundedSize(size);
+        var normalizedPage = validatedPage(page, bounded);
+        var start = utcMonthStart(year, month);
+        var end = start.plusMonths(1);
+        var projections = postQueryRepository.findPublishedInUtcMonth(start, end, bounded, offset(normalizedPage, bounded));
+        var total = postQueryRepository.countPublishedInUtcMonth(start, end);
+        return summarizePage(projections, normalizedPage, bounded, total);
     }
 
     private PostDetailResponse detail(Long postId, boolean publicOnly) {
@@ -223,6 +274,7 @@ public class PostService {
                 .map(tag -> new TaxonomyItemResponse(tag.getId(), tag.getSlug(), tag.getName(), tag.getDescription()))
                 .toList();
         var viewCount = postViewCounterRepository.findByPostId(postId).map(counter -> counter.getViewCount()).orElse(0L);
+        var citations = publicOnly ? postQueryRepository.citationsForPost(postId) : List.<PostCitationResponse>of();
         var related = postQueryRepository.relatedPublishedPosts(postId, 5).stream().map(this::toSummary).toList();
         return new PostDetailResponse(
                 post.getId(),
@@ -238,6 +290,7 @@ public class PostService {
                 viewCount,
                 categories,
                 tags,
+                citations,
                 related);
     }
 
@@ -255,6 +308,24 @@ public class PostService {
                 post.getContentHtml(),
                 source,
                 note));
+    }
+
+    private void enqueuePublicMutationIfNeeded(Post post, String eventType, boolean wasPublished, String oldSlug) {
+        if (!wasPublished && !post.isPublished()) {
+            return;
+        }
+        publicationOutboxService.enqueuePostEvent(
+                post.getId(),
+                eventType,
+                post.getSlug(),
+                affectedSlugs(oldSlug, post.getSlug()));
+    }
+
+    private List<String> affectedSlugs(String oldSlug, String newSlug) {
+        return java.util.stream.Stream.of(oldSlug, newSlug)
+                .filter(slug -> slug != null && !slug.isBlank())
+                .distinct()
+                .toList();
     }
 
     private void requireExistingTaxonomy(List<Long> categoryIds, List<Long> tagIds) {
@@ -334,7 +405,7 @@ public class PostService {
             int size,
             long total) {
         var items = projections.stream().map(this::toSummary).toList();
-        return toPageResponse(items, page, size, total, (int) Math.ceil((double) total / size));
+        return toPageResponse(items, page, size, total, totalPages(total, size));
     }
 
     private <T> PostPageResponse<T> toPageResponse(List<T> items, int page, int size, long totalElements, int totalPages) {
@@ -347,6 +418,39 @@ public class PostService {
 
     private int boundedSize(int requested) {
         return Math.max(1, Math.min(requested <= 0 ? 20 : requested, 50));
+    }
+
+    private int validatedPage(int requested, int size) {
+        if (requested < 0) {
+            throw new IllegalArgumentException("Page index must not be negative.");
+        }
+        if ((long) requested * (long) size > Integer.MAX_VALUE) {
+            throw new IllegalArgumentException("Page offset exceeds the maximum supported range.");
+        }
+        return requested;
+    }
+
+    private long offset(int page, int size) {
+        return (long) page * (long) size;
+    }
+
+    private int totalPages(long totalElements, int size) {
+        if (totalElements <= 0) {
+            return 0;
+        }
+        long pages = (totalElements + size - 1) / size;
+        return pages > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) pages;
+    }
+
+    private LocalDateTime utcMonthStart(int year, int month) {
+        if (year < 1000 || year > 9998) {
+            throw new IllegalArgumentException("Archive year must be between 1000 and 9998.");
+        }
+        try {
+            return LocalDateTime.of(year, month, 1, 0, 0);
+        } catch (DateTimeException exception) {
+            throw new IllegalArgumentException("Archive month must be a valid UTC calendar month.", exception);
+        }
     }
 
     private LocalDateTime now() {

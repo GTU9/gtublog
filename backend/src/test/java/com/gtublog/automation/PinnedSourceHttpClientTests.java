@@ -2,11 +2,14 @@ package com.gtublog.automation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.InetAddress;
 import java.net.ServerSocket;
@@ -14,6 +17,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import javax.net.ssl.SSLContext;
@@ -22,14 +26,17 @@ import javax.net.ssl.X509TrustManager;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.ObjectMapper;
 
 class PinnedSourceHttpClientTests {
 
+    private static final InetAddress IPV4_LOOPBACK = loopbackAddress();
+
     @Test
     void enforcesOneDeadlineAcrossAnEntireRedirectChain() throws Exception {
-        try (var firstServer = new ServerSocket(0);
-                var secondServer = new ServerSocket(0);
-                var executor = Executors.newFixedThreadPool(2)) {
+        try (var executor = Executors.newFixedThreadPool(2);
+                var firstServer = new ServerSocket(0, 50, IPV4_LOOPBACK);
+                var secondServer = new ServerSocket(0, 50, IPV4_LOOPBACK)) {
             executor.submit(() -> {
                 try (var socket = firstServer.accept()) {
                     consumeRequest(socket);
@@ -39,6 +46,7 @@ class PinnedSourceHttpClientTests {
                                     + "/final\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
                             .getBytes(StandardCharsets.US_ASCII));
                     socket.getOutputStream().flush();
+                    Thread.sleep(100);
                 }
                 return null;
             });
@@ -56,10 +64,11 @@ class PinnedSourceHttpClientTests {
                 return null;
             });
 
-            var resolver = (SourceUrlPolicy.AddressResolver) host -> new InetAddress[] {InetAddress.getLoopbackAddress()};
+            var resolver = (SourceUrlPolicy.AddressResolver) host -> new InetAddress[] {IPV4_LOOPBACK};
             var policy = new SourceUrlPolicy(Set.of("first.invalid", "second.invalid"), resolver);
             var client = new PinnedSourceHttpClient(Duration.ofMillis(100), Duration.ofMillis(180));
-            var service = new SourceCollectionService(null, null, policy, client);
+            var service = new SourceCollectionService(
+                    null, policy, client, new ObjectMapper(), mock(SourceSnapshotEvidenceService.class));
 
             assertThatThrownBy(() -> service.fetch("http://first.invalid:" + firstServer.getLocalPort() + "/start"))
                     .isInstanceOf(java.io.IOException.class)
@@ -92,8 +101,8 @@ class PinnedSourceHttpClientTests {
 
     @Test
     void connectsToTheValidatedAddressWithoutResolvingTheRequestHostnameAgain() throws Exception {
-        try (var server = new ServerSocket(0);
-                var executor = Executors.newSingleThreadExecutor()) {
+        try (var executor = Executors.newSingleThreadExecutor();
+                var server = new ServerSocket(0, 50, IPV4_LOOPBACK)) {
             var hostHeader = executor.submit(() -> {
                 try (var socket = server.accept();
                         var reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII))) {
@@ -110,13 +119,14 @@ class PinnedSourceHttpClientTests {
                             .getBytes(StandardCharsets.US_ASCII));
                     socket.getOutputStream().write(body);
                     socket.getOutputStream().flush();
+                    Thread.sleep(100);
                     return host;
                 }
             });
 
             var target = new SourceUrlPolicy.ResolvedSourceUrl(
                     URI.create("http://dns-rebind.invalid:" + server.getLocalPort() + "/feed"),
-                    List.of(InetAddress.getLoopbackAddress()));
+                    List.of(IPV4_LOOPBACK));
             var response = new PinnedSourceHttpClient(Duration.ofSeconds(1), Duration.ofSeconds(2)).get(target);
 
             assertThat(new String(response.body(), StandardCharsets.UTF_8)).isEqualTo("pinned response");
@@ -133,8 +143,8 @@ class PinnedSourceHttpClientTests {
 
     @Test
     void enforcesOneDeadlineAcrossHeadersAndTheEntireBody() throws Exception {
-        try (var server = new ServerSocket(0);
-                var executor = Executors.newSingleThreadExecutor()) {
+        try (var executor = Executors.newSingleThreadExecutor();
+                var server = new ServerSocket(0, 50, IPV4_LOOPBACK)) {
             executor.submit(() -> {
                 try (var socket = server.accept()) {
                     var reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
@@ -152,7 +162,7 @@ class PinnedSourceHttpClientTests {
 
             var target = new SourceUrlPolicy.ResolvedSourceUrl(
                     URI.create("http://slow.invalid:" + server.getLocalPort() + "/feed"),
-                    List.of(InetAddress.getLoopbackAddress()));
+                    List.of(IPV4_LOOPBACK));
 
             assertThatThrownBy(() -> new PinnedSourceHttpClient(Duration.ofMillis(100), Duration.ofMillis(150)).get(target))
                     .isInstanceOf(java.io.IOException.class)
@@ -162,30 +172,47 @@ class PinnedSourceHttpClientTests {
 
     @Test
     void rejectsAnOversizedBodyBeforeReadingIt() throws Exception {
-        try (var server = new ServerSocket(0);
-                var executor = Executors.newSingleThreadExecutor()) {
-            executor.submit(() -> {
-                try (var socket = server.accept()) {
-                    var reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
-                    while (!reader.readLine().isEmpty()) {
-                        // Consume the request.
-                    }
-                    socket.getOutputStream().write(
-                            "HTTP/1.1 200 OK\r\nContent-Length: 2097153\r\nConnection: close\r\n\r\n"
-                                    .getBytes(StandardCharsets.US_ASCII));
-                    socket.getOutputStream().flush();
-                }
-                return null;
-            });
+        var neverRead = new InputStream() {
+            @Override
+            public int read() {
+                throw new AssertionError("Body must not be read after an oversized Content-Length.");
+            }
+        };
+        var client = new PinnedSourceHttpClient(Duration.ofSeconds(1), Duration.ofSeconds(2));
+        assertThatThrownBy(() -> client.readBody(neverRead, Map.of("content-length", "2097153")))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("allowed size");
+    }
 
-            var target = new SourceUrlPolicy.ResolvedSourceUrl(
-                    URI.create("http://oversized.invalid:" + server.getLocalPort() + "/feed"),
-                    List.of(InetAddress.getLoopbackAddress()));
+    @Test
+    void decodesChunkedBodiesAndTrailers() throws Exception {
+        var response = "4\r\nWiki\r\n5\r\npedia\r\n0\r\nX-Trace: test\r\n\r\n";
+        var client = new PinnedSourceHttpClient(Duration.ofSeconds(1), Duration.ofSeconds(2));
 
-            assertThatThrownBy(() -> new PinnedSourceHttpClient(Duration.ofSeconds(1), Duration.ofSeconds(2)).get(target))
-                    .isInstanceOf(java.io.IOException.class)
-                    .hasMessageContaining("allowed size");
-        }
+        assertThat(client.readBody(
+                        new ByteArrayInputStream(response.getBytes(StandardCharsets.US_ASCII)),
+                        Map.of("transfer-encoding", "chunked")))
+                .isEqualTo("Wikipedia".getBytes(StandardCharsets.US_ASCII));
+    }
+
+    @Test
+    void rejectsOversizedAndMalformedChunkedBodies() {
+        var client = new PinnedSourceHttpClient(Duration.ofSeconds(1), Duration.ofSeconds(2));
+        var headers = Map.of("transfer-encoding", "chunked");
+
+        assertThatThrownBy(() -> client.readBody(
+                        new ByteArrayInputStream("200001\r\n".getBytes(StandardCharsets.US_ASCII)), headers))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("allowed size");
+        assertThatThrownBy(() -> client.readBody(
+                        new ByteArrayInputStream("not-hex\r\n".getBytes(StandardCharsets.US_ASCII)), headers))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("chunk size is invalid");
+        assertThatThrownBy(() -> client.readBody(
+                        new ByteArrayInputStream("4\r\nWikiXX0\r\n\r\n".getBytes(StandardCharsets.US_ASCII)),
+                        headers))
+                .isInstanceOf(java.io.IOException.class)
+                .hasMessageContaining("chunk delimiter is invalid");
     }
 
     private javax.net.ssl.SSLSocketFactory trustTestCertificateSocketFactory() throws Exception {
@@ -206,5 +233,13 @@ class PinnedSourceHttpClientTests {
         var context = SSLContext.getInstance("TLS");
         context.init(null, new TrustManager[] {trustManager}, null);
         return context.getSocketFactory();
+    }
+
+    private static InetAddress loopbackAddress() {
+        try {
+            return InetAddress.getByName("127.0.0.1");
+        } catch (Exception exception) {
+            throw new ExceptionInInitializerError(exception);
+        }
     }
 }

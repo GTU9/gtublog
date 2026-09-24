@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import com.github.tomakehurst.wiremock.core.Options;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -39,7 +40,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 @Tag("docker")
-@SpringBootTest
+@SpringBootTest(properties = {
+        "spring.quartz.auto-startup=false",
+        "app.automation.worker.schema-version=automation-job-v2"
+})
 class GenerationJobWorkerIntegrationTests {
 
     private static final String MYSQL_IMAGE =
@@ -51,7 +55,8 @@ class GenerationJobWorkerIntegrationTests {
             .withUsername("gtublog")
             .withPassword("gtublog-test-password");
 
-    private static final WireMockServer WIREMOCK = new WireMockServer(WireMockConfiguration.wireMockConfig().dynamicPort());
+    private static final WireMockServer WIREMOCK = new WireMockServer(WireMockConfiguration.wireMockConfig()
+            .dynamicPort().useChunkedTransferEncoding(Options.ChunkedEncodingPolicy.BODY_FILE));
 
     static {
         MYSQL.start();
@@ -168,6 +173,7 @@ class GenerationJobWorkerIntegrationTests {
         var claimJson = jsonBody(claimResult);
         assertThat(claimJson.get("jobId").asLong()).isEqualTo(job.getId());
         assertThat(claimJson.get("providerName").asText()).isEqualTo("fake-provider");
+        assertThat(claimJson.has("taxonomyCatalog")).isFalse();
         assertThat(claimJson.get("snapshots")).hasSize(2);
         long firstSnapshotId = claimJson.at("/snapshots/0/snapshotId").asLong();
         long secondSnapshotId = claimJson.at("/snapshots/1/snapshotId").asLong();
@@ -198,11 +204,13 @@ class GenerationJobWorkerIntegrationTests {
         assertThat(storedJob.getJobStatus()).isEqualTo(GenerationJobStatus.SUBMITTED);
         assertThat(storedJob.getResultPayloadJson()).contains("자동 초안");
         assertThat(storedJob.getSubmittedAt()).isNotNull();
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isEqualTo(1);
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post_revision", Integer.class)).isEqualTo(1);
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post_revision_source_snapshot", Integer.class)).isEqualTo(2);
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class)).isEqualTo(1);
-        assertThat(jdbcTemplate.queryForObject("SELECT status FROM automation_run WHERE id = ?", String.class, job.getRunId())).isEqualTo("SUCCEEDED");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post_revision", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post_revision_source_snapshot", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM automation_run WHERE id = ?", String.class, job.getRunId())).isEqualTo("HELD");
+        assertThat(jdbcTemplate.queryForObject("SELECT hold_reason FROM automation_run WHERE id = ?", String.class, job.getRunId()))
+                .containsIgnoringCase("taxonomy");
     }
 
     @Test
@@ -233,9 +241,9 @@ class GenerationJobWorkerIntegrationTests {
                 .andReturn();
 
         assertThat(jsonBody(retryResponse)).isEqualTo(jsonBody(firstResponse));
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isEqualTo(1);
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post_revision", Integer.class)).isEqualTo(1);
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post_revision", Integer.class)).isZero();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class)).isZero();
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM audit_entry WHERE action_type = 'GENERATION_JOB_SUBMITTED'",
                 Integer.class)).isEqualTo(1);
@@ -296,7 +304,7 @@ class GenerationJobWorkerIntegrationTests {
                         .content(failureSubmitBody("worker-conflict", "prompt-v1", "different terminal")))
                 .andExpect(status().isConflict());
 
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isZero();
         assertThat(jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM audit_entry WHERE action_type = 'GENERATION_JOB_SUBMITTED'",
                 Integer.class)).isEqualTo(1);
@@ -363,7 +371,7 @@ class GenerationJobWorkerIntegrationTests {
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class)).isZero();
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM automation_run WHERE id = ?", String.class, job.getRunId())).isEqualTo("HELD");
         assertThat(jdbcTemplate.queryForObject("SELECT hold_reason FROM automation_run WHERE id = ?", String.class, job.getRunId()))
-                .contains("corroboration");
+                .containsIgnoringCase("taxonomy");
     }
 
     @Test
@@ -615,7 +623,9 @@ class GenerationJobWorkerIntegrationTests {
                 WIREMOCK.baseUrl().replace("localhost", "127.0.0.1") + "/worker-feed-2",
                 true));
         var run = automationAdminService.triggerManualRun(topic.id(), "story-8-run");
-        return generationJobRepository.findByRunId(run.id()).orElseThrow();
+        return generationJobRepository.findByRunId(run.id())
+                .orElseThrow(() -> new IllegalStateException("No job for run " + run.id()
+                        + " (status=" + run.status() + ", hold=" + run.holdReason() + ")"));
     }
 
     private GenerationJob seedSingleSourceGenerationJob() {
@@ -673,7 +683,10 @@ class GenerationJobWorkerIntegrationTests {
                         contentMarkdown,
                         citationSnapshotIds),
                 null);
-        return objectMapper.writeValueAsString(withCanonicalDigest(requestWithoutDigest));
+        var body = (tools.jackson.databind.node.ObjectNode) objectMapper.valueToTree(withCanonicalDigest(requestWithoutDigest));
+        body.withObject("/draft").remove("taxonomy");
+        body.remove("failureReason");
+        return objectMapper.writeValueAsString(body);
     }
 
     private String failureSubmitBody(String workerId, String promptVersion, String failureReason) throws Exception {
@@ -686,7 +699,9 @@ class GenerationJobWorkerIntegrationTests {
                 "automation-job-v2",
                 null,
                 failureReason);
-        return objectMapper.writeValueAsString(withCanonicalDigest(requestWithoutDigest));
+        var body = (tools.jackson.databind.node.ObjectNode) objectMapper.valueToTree(withCanonicalDigest(requestWithoutDigest));
+        body.remove("draft");
+        return objectMapper.writeValueAsString(body);
     }
 
     private GenerationJobSubmitRequest withCanonicalDigest(GenerationJobSubmitRequest request) {

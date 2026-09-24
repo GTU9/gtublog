@@ -17,7 +17,7 @@ public interface PostRepository extends JpaRepository<Post, Long> {
     @Query("""
             select post from Post post
             where post.deletedAt is null
-            order by post.createdAt desc
+            order by post.createdAt desc, post.id desc
             """)
     Page<Post> findAllActive(Pageable pageable);
 

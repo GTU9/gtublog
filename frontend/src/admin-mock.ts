@@ -7,6 +7,9 @@ import type {
   AuditEntryResponse,
   AutomationDiagnosticsResponse,
   AutomationOutboxResponse,
+  AutomationOriginApprovalResponse,
+  AutomationOriginGroupResponse,
+  AutomationOriginPairResponse,
   AutomationRunDetailResponse,
   AutomationRunOverridePublishResponse,
   AutomationRunResponse,
@@ -206,6 +209,12 @@ const initialAutomationSchedules: AutomationScheduleResponse[] = [
 ];
 let automationTopicsStore = initialAutomationTopics.map((item) => ({ ...item }));
 let automationSourcesStore = initialAutomationSources.map((item) => ({ ...item }));
+let automationOriginGroupsStore: AutomationOriginGroupResponse[] = [];
+let automationOriginApprovalsStore: AutomationOriginApprovalResponse[] = [];
+let automationOriginPairsStore: AutomationOriginPairResponse[] = [];
+let nextAutomationOriginGroupId = 1;
+let nextAutomationOriginApprovalId = 1;
+let nextAutomationOriginPairId = 1;
 let automationSchedulesStore = initialAutomationSchedules.map((item) => ({ ...item }));
 let nextAutomationTopicId = Math.max(...initialAutomationTopics.map((item) => item.id), 1) + 1;
 let nextAutomationSourceId = Math.max(...initialAutomationSources.map((item) => item.id), 100) + 1;
@@ -269,12 +278,23 @@ function createInitialAutomationRunDetails(runs: AutomationRunResponse[]) {
           canCancel: false,
           canOverridePublish: false,
         },
+        originPairs: [
+          {
+            pairApprovalId: 9001,
+            approvalRevision: 1,
+            groupLowId: 1,
+            groupHighId: 2,
+            capturedAt: "2026-06-29T00:00:00Z",
+          },
+        ],
         snapshots: [
           {
             id: 5001,
-            sourceUrl: "https://example.com/feed.xml",
-            canonicalUrl: "https://example.com/posts/ai-update",
-            originHost: "example.com",
+            automationSourceId: 101,
+            sourceUrl: "https://articles.example.org/posts/ai-update",
+            sourceFeedUrl: "https://example.com/feed.xml",
+            canonicalUrl: "https://articles.example.org/posts/ai-update",
+            originHost: "articles.example.org",
             title: "AI update from source one",
             httpStatus: 200,
             policyResult: "ALLOWED",
@@ -283,6 +303,7 @@ function createInitialAutomationRunDetails(runs: AutomationRunResponse[]) {
           },
           {
             id: 5002,
+            automationSourceId: 102,
             sourceUrl: "https://news.example.org/ai",
             canonicalUrl: "https://news.example.org/posts/ai-update",
             originHost: "news.example.org",
@@ -299,11 +320,19 @@ function createInitialAutomationRunDetails(runs: AutomationRunResponse[]) {
       302,
       {
         run: runs[1],
+        publicationDecision: {
+          outcome: "HELD",
+          holdReason: runs[1].holdReason,
+          detailReason: "CLAIM_EVIDENCE_UNVERIFIED",
+          decisionJson: "{}",
+          relations: [],
+        },
         generatedDraft: {
           title: "보류된 자동 초안",
           excerpt: "출처가 부족해서 자동 발행이 보류된 초안입니다.",
           contentMarkdown: "# 보류된 자동 초안\n\n검토 후 수동 발행할 수 있습니다.",
           citationSnapshotIds: [5003],
+          taxonomy: { categoryId: 2, tagIds: [12] },
         },
         availableActions: {
           canRetry: true,
@@ -313,9 +342,11 @@ function createInitialAutomationRunDetails(runs: AutomationRunResponse[]) {
         snapshots: [
           {
             id: 5003,
-            sourceUrl: "https://example.com/feed.xml",
-            canonicalUrl: "https://example.com/posts/duplicate-ai-update",
-            originHost: "example.com",
+            automationSourceId: 101,
+            sourceUrl: "https://articles.example.org/posts/duplicate-ai-update",
+            sourceFeedUrl: "https://example.com/feed.xml",
+            canonicalUrl: "https://articles.example.org/posts/duplicate-ai-update",
+            originHost: "articles.example.org",
             title: "Single-source duplicate candidate",
             httpStatus: 200,
             policyResult: "ALLOWED",
@@ -338,6 +369,9 @@ function createInitialAutomationOutbox(): AutomationOutboxResponse[] {
       availableAt: "2026-06-29T00:00:11Z",
       processedAt: "2026-06-29T00:00:12Z",
       lastAttemptAt: "2026-06-29T00:00:12Z",
+      attemptCount: 1,
+      leaseExpiresAt: null,
+      failureReason: null,
       createdAt: "2026-06-29T00:00:11Z",
     },
     {
@@ -348,6 +382,9 @@ function createInitialAutomationOutbox(): AutomationOutboxResponse[] {
       availableAt: "2026-06-29T08:20:00Z",
       processedAt: null,
       lastAttemptAt: "2026-06-29T08:15:00Z",
+      attemptCount: 1,
+      leaseExpiresAt: null,
+      failureReason: "Revalidation endpoint returned HTTP 503.",
       createdAt: "2026-06-29T08:10:00Z",
     },
   ];
@@ -360,13 +397,23 @@ function cloneAutomationRun(run: AutomationRunResponse): AutomationRunResponse {
 function cloneAutomationRunDetail(detail: AutomationRunDetailResponse): AutomationRunDetailResponse {
   return {
     run: cloneAutomationRun(detail.run),
+    publicationDecision: detail.publicationDecision
+      ? {
+          ...detail.publicationDecision,
+          relations: detail.publicationDecision.relations.map((relation) => ({ ...relation })),
+        }
+      : null,
     generatedDraft: detail.generatedDraft
       ? {
           ...detail.generatedDraft,
           citationSnapshotIds: [...detail.generatedDraft.citationSnapshotIds],
+          taxonomy: detail.generatedDraft.taxonomy
+            ? { categoryId: detail.generatedDraft.taxonomy.categoryId, tagIds: [...detail.generatedDraft.taxonomy.tagIds] }
+            : null,
         }
       : null,
     availableActions: { ...detail.availableActions },
+    originPairs: detail.originPairs?.map((pair) => ({ ...pair })),
     snapshots: detail.snapshots.map((snapshot) => ({ ...snapshot })),
   };
 }
@@ -447,6 +494,12 @@ export function resetAdminMockState() {
   nextAuditId = Math.max(...auditStore.map((entry) => entry.id), 9000) + 1;
   automationTopicsStore = initialAutomationTopics.map((item) => ({ ...item }));
   automationSourcesStore = initialAutomationSources.map((item) => ({ ...item }));
+  automationOriginGroupsStore = [];
+  automationOriginApprovalsStore = [];
+  automationOriginPairsStore = [];
+  nextAutomationOriginGroupId = 1;
+  nextAutomationOriginApprovalId = 1;
+  nextAutomationOriginPairId = 1;
   automationSchedulesStore = initialAutomationSchedules.map((item) => ({ ...item }));
   nextAutomationTopicId = Math.max(...initialAutomationTopics.map((item) => item.id), 1) + 1;
   nextAutomationSourceId = Math.max(...initialAutomationSources.map((item) => item.id), 100) + 1;
@@ -487,6 +540,123 @@ export function mockAutomationSources(topicId: number) {
   return automationSourcesStore.filter((item) => item.topicId === topicId).map((item) => ({ ...item }));
 }
 
+export function mockAutomationOriginGroups(topicId: number) {
+  return automationOriginGroupsStore.filter((item) => item.topicId === topicId).map((item) => ({ ...item }));
+}
+
+export function mockCreateAutomationOriginGroup(topicId: number, request: { name: string; rationale: string }) {
+  const now = new Date().toISOString();
+  const group: AutomationOriginGroupResponse = {
+    id: nextAutomationOriginGroupId++, topicId, name: request.name.trim(), rationale: request.rationale.trim(),
+    createdAt: now, updatedAt: now,
+  };
+  automationOriginGroupsStore = [...automationOriginGroupsStore, group];
+  recordAudit("AUTOMATION", String(group.id), "ORIGIN_GROUP_CREATED", { topicId });
+  return { ...group };
+}
+
+export function mockAutomationOriginApprovals(sourceId: number) {
+  return automationOriginApprovalsStore.filter((item) => item.sourceId === sourceId).map((item) => ({ ...item }));
+}
+
+export function mockCreateAutomationOriginApproval(
+  sourceId: number, request: { originHost: string; groupId: number; rationale: string },
+) {
+  const source = automationSourcesStore.find((item) => item.id === sourceId);
+  const group = automationOriginGroupsStore.find((item) => item.id === request.groupId && item.topicId === source?.topicId);
+  if (!source || !group) throw new Error("소스와 주제에 속한 그룹을 선택하세요.");
+  const originHost = request.originHost.trim().toLowerCase();
+  if (automationOriginApprovalsStore.some((item) => item.sourceId === sourceId && item.originHost === originHost && item.active)) {
+    throw new Error("이 소스와 기사 호스트는 이미 승인되어 있습니다.");
+  }
+  const now = new Date().toISOString();
+  const approval: AutomationOriginApprovalResponse = {
+    id: nextAutomationOriginApprovalId++, sourceId, originHost, groupId: group.id, groupName: group.name,
+    rationale: request.rationale.trim(), revocationRationale: null, active: true, revision: 1, approvedAt: now, revokedAt: null,
+    createdAt: now, updatedAt: now,
+  };
+  automationOriginApprovalsStore = [...automationOriginApprovalsStore, approval];
+  recordAudit("AUTOMATION", String(approval.id), "ORIGIN_APPROVAL_CREATED", { sourceId, originHost });
+  return { ...approval };
+}
+
+export function mockRevokeAutomationOriginApproval(approvalId: number, request: { revision: number; rationale: string }) {
+  const approval = automationOriginApprovalsStore.find((item) => item.id === approvalId);
+  if (!approval || !approval.active || approval.revision !== request.revision) {
+    throw new Error("승인 상태가 변경되었습니다. 목록을 새로 불러온 뒤 다시 시도하세요.");
+  }
+  const now = new Date().toISOString();
+  const revoked = { ...approval, active: false, revision: approval.revision + 1,
+    revocationRationale: request.rationale.trim(), revokedAt: now, updatedAt: now };
+  automationOriginApprovalsStore = automationOriginApprovalsStore.map((item) => item.id === approvalId ? revoked : item);
+  recordAudit("AUTOMATION", String(approvalId), "ORIGIN_APPROVAL_REVOKED", { rationale: request.rationale.trim() });
+  return { ...revoked };
+}
+
+export function mockAutomationOriginPairs(topicId: number) {
+  return automationOriginPairsStore.filter((item) => item.topicId === topicId).map((item) => ({ ...item }));
+}
+
+export function mockCreateAutomationOriginPair(
+  topicId: number,
+  request: { firstGroupId: number; secondGroupId: number; rationale: string },
+) {
+  const first = automationOriginGroupsStore.find((item) => item.id === request.firstGroupId && item.topicId === topicId);
+  const second = automationOriginGroupsStore.find((item) => item.id === request.secondGroupId && item.topicId === topicId);
+  if (!first || !second || first.id === second.id) {
+    throw new Error("같은 주제에 속한 서로 다른 두 그룹을 선택하세요.");
+  }
+  const [low, high] = first.id < second.id ? [first, second] : [second, first];
+  if (automationOriginPairsStore.some((item) =>
+    item.topicId === topicId && item.groupLowId === low.id && item.groupHighId === high.id && item.active
+  )) {
+    throw new Error("이 출처 그룹 쌍은 이미 활성 승인되어 있습니다.");
+  }
+  const now = new Date().toISOString();
+  const pair: AutomationOriginPairResponse = {
+    id: nextAutomationOriginPairId++,
+    topicId,
+    groupLowId: low.id,
+    groupHighId: high.id,
+    groupLowName: low.name,
+    groupHighName: high.name,
+    rationale: request.rationale.trim(),
+    revocationRationale: null,
+    active: true,
+    revision: 1,
+    approvedAt: now,
+    revokedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  automationOriginPairsStore = [...automationOriginPairsStore, pair];
+  recordAudit("AUTOMATION", String(pair.id), "ORIGIN_PAIR_APPROVAL_CREATED", {
+    topicId,
+    groupLowId: pair.groupLowId,
+    groupHighId: pair.groupHighId,
+  });
+  return { ...pair };
+}
+
+export function mockRevokeAutomationOriginPair(pairId: number, request: { revision: number; rationale: string }) {
+  const pair = automationOriginPairsStore.find((item) => item.id === pairId);
+  if (!pair || !pair.active || pair.revision !== request.revision) {
+    throw new Error("그룹 쌍 승인 상태가 변경되었습니다. 목록을 새로 불러온 뒤 다시 시도하세요.");
+  }
+  const now = new Date().toISOString();
+  const revoked: AutomationOriginPairResponse = {
+    ...pair,
+    active: false,
+    revision: pair.revision + 1,
+    revocationRationale: request.rationale.trim(),
+    revokedAt: now,
+    updatedAt: now,
+  };
+  automationOriginPairsStore = automationOriginPairsStore.map((item) => item.id === pairId ? revoked : item);
+  recordAudit("AUTOMATION", String(pairId), "ORIGIN_PAIR_APPROVAL_REVOKED", { rationale: request.rationale.trim() });
+  return { ...revoked };
+}
+
 export function mockSaveAutomationSource(
   topicId: number,
   editingId: number | null,
@@ -507,6 +677,14 @@ export function mockSaveAutomationSource(
   automationSourcesStore = editingId
     ? automationSourcesStore.map((item) => (item.id === editingId ? record : item))
     : [...automationSourcesStore, record];
+  if (existing && (existing.sourceUrl !== record.sourceUrl || existing.sourceType !== record.sourceType)) {
+    automationOriginApprovalsStore = automationOriginApprovalsStore.map((approval) =>
+      approval.sourceId === record.id && approval.active
+        ? { ...approval, active: false, revision: approval.revision + 1,
+          revocationRationale: "Source URL or type changed.", revokedAt: now, updatedAt: now }
+        : approval,
+    );
+  }
   recordAudit("AUTOMATION", String(record.id), editingId ? "AUTOMATION_SOURCE_UPDATED" : "AUTOMATION_SOURCE_CREATED", {
     topicId: record.topicId,
   });
@@ -519,7 +697,7 @@ export function mockDeleteAutomationSource(sourceId: number) {
     throw new Error("자동화 소스를 찾을 수 없습니다.");
   }
   const isReferenced = Array.from(automationRunDetailsStore.values()).some((detail) =>
-    detail.snapshots.some((snapshot) => snapshot.sourceUrl === source.sourceUrl),
+    detail.snapshots.some((snapshot) => snapshot.automationSourceId === source.id),
   );
   if (isReferenced) {
     throw new Error("이 소스는 이미 수집 증거에 연결되어 있습니다. 삭제 대신 비활성화하세요.");
@@ -591,6 +769,15 @@ export function mockAutomationRunDetail(runId: number) {
 
 export function mockTriggerAutomationRun(topicId: number) {
   const now = new Date().toISOString();
+  const originPairs = automationOriginPairsStore
+    .filter((pair) => pair.topicId === topicId && pair.active)
+    .map((pair) => ({
+      pairApprovalId: pair.id,
+      approvalRevision: pair.revision,
+      groupLowId: pair.groupLowId,
+      groupHighId: pair.groupHighId,
+      capturedAt: now,
+    }));
   const run: AutomationRunResponse = {
     id: Math.max(...automationRunsStore.map((item) => item.id), 300) + 1,
     runKey: `run-${Date.now()}`,
@@ -619,12 +806,15 @@ export function mockTriggerAutomationRun(topicId: number) {
       canCancel: true,
       canOverridePublish: false,
     },
+    originPairs,
     snapshots: [
       {
         id: Date.now(),
-        sourceUrl: "https://example.com/feed.xml",
-        canonicalUrl: "https://example.com/posts/latest",
-        originHost: "example.com",
+        automationSourceId: 101,
+        sourceUrl: "https://articles.example.org/posts/latest",
+        sourceFeedUrl: "https://example.com/feed.xml",
+        canonicalUrl: "https://articles.example.org/posts/latest",
+        originHost: "articles.example.org",
         title: "Manual automation source",
         httpStatus: 200,
         policyResult: "ALLOWED",
@@ -633,6 +823,7 @@ export function mockTriggerAutomationRun(topicId: number) {
       },
       {
         id: Date.now() + 1,
+        automationSourceId: 102,
         sourceUrl: "https://news.example.org/ai",
         canonicalUrl: "https://news.example.org/posts/latest",
         originHost: "news.example.org",
@@ -787,6 +978,8 @@ export function mockAutomationDiagnostics(): AutomationDiagnosticsResponse {
     outboxCounts: {
       pending: automationOutboxStore.filter((item) => item.deliveryStatus === "PENDING").length,
       delivered: automationOutboxStore.filter((item) => item.deliveryStatus === "DELIVERED").length,
+      inFlight: automationOutboxStore.filter((item) => item.deliveryStatus === "IN_FLIGHT").length,
+      deadLetter: automationOutboxStore.filter((item) => item.deliveryStatus === "DEAD_LETTER").length,
     },
     heldSnapshotCount: 1,
     recentHoldReasons: automationRunsStore.map((item) => item.holdReason).filter((item): item is string => Boolean(item)),

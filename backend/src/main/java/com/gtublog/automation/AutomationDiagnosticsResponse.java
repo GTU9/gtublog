@@ -27,6 +27,8 @@ public record AutomationDiagnosticsResponse(
 
     public record OutboxCounts(
             long pending,
-            long delivered) {
+            long delivered,
+            long inFlight,
+            long deadLetter) {
     }
 }

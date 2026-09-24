@@ -1,10 +1,12 @@
 import type { MetadataRoute } from "next";
 
-import { listAllPosts } from "@/src/public-api";
+import { listSitemapPosts } from "@/src/public-api";
 import { absoluteUrl } from "@/src/site";
 
+export const dynamic = "force-dynamic";
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const posts = await listAllPosts();
+  const posts = await listSitemapPosts();
 
   const categorySlugs = new Set(posts.flatMap((post) => post.categoryDetails?.map((item) => item.slug) ?? []));
   const tagSlugs = new Set(posts.flatMap((post) => post.tagDetails?.map((item) => item.slug) ?? []));

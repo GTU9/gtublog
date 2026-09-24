@@ -4,8 +4,8 @@ import com.gtublog.audit.AuditActorType;
 import com.gtublog.audit.AuditService;
 import com.gtublog.audit.AuditTargetType;
 import com.gtublog.observability.PlatformMetricsService;
-import java.time.LocalDateTime;
 import java.time.Clock;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,19 +19,28 @@ public class AutomationRunLifecycleService {
 
     private static final String DEFAULT_LEASE_OWNER = "automation-pipeline";
 
+    private final AutomationTopicRepository automationTopicRepository;
     private final AutomationRunRepository automationRunRepository;
+    private final AutomationOriginPairApprovalRepository originPairApprovalRepository;
+    private final AutomationRunOriginPairRepository runOriginPairRepository;
     private final AuditService auditService;
     private final PlatformMetricsService platformMetricsService;
     private final AutomationProperties automationProperties;
     private final Clock clock;
 
     public AutomationRunLifecycleService(
+            AutomationTopicRepository automationTopicRepository,
             AutomationRunRepository automationRunRepository,
+            AutomationOriginPairApprovalRepository originPairApprovalRepository,
+            AutomationRunOriginPairRepository runOriginPairRepository,
             AuditService auditService,
             PlatformMetricsService platformMetricsService,
             AutomationProperties automationProperties,
             Clock clock) {
+        this.automationTopicRepository = automationTopicRepository;
         this.automationRunRepository = automationRunRepository;
+        this.originPairApprovalRepository = originPairApprovalRepository;
+        this.runOriginPairRepository = runOriginPairRepository;
         this.auditService = auditService;
         this.platformMetricsService = platformMetricsService;
         this.automationProperties = automationProperties;
@@ -59,6 +68,8 @@ public class AutomationRunLifecycleService {
             return new StartResult(existing.get(), false);
         }
 
+        automationTopicRepository.findByIdForUpdate(topicId)
+                .orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
         var now = now();
         var run = automationRunRepository.saveAndFlush(AutomationRun.start(
                 UUID.randomUUID().toString(),
@@ -70,9 +81,17 @@ public class AutomationRunLifecycleService {
                 DEFAULT_LEASE_OWNER,
                 now.plus(automationProperties.run().pipelineLeaseDuration()),
                 now));
+        var activePairs = originPairApprovalRepository.findAllByTopicIdAndActiveTrueOrderByGroupLowIdAscGroupHighIdAsc(topicId);
+        if (!activePairs.isEmpty()) {
+            runOriginPairRepository.saveAll(activePairs.stream()
+                    .map(pair -> AutomationRunOriginPair.capture(run.getId(), pair, now))
+                    .toList());
+            runOriginPairRepository.flush();
+        }
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("triggerType", triggerType);
         detail.put("topicId", topicId);
+        detail.put("originPairApprovalCount", activePairs.size());
         if (retryOfRunId != null) {
             detail.put("retryOfRunId", retryOfRunId);
         }
@@ -104,6 +123,33 @@ public class AutomationRunLifecycleService {
     }
 
     public record StartResult(AutomationRun run, boolean createdNew) {
+    }
+
+    @Transactional
+    public RetryResult startRetry(Long runId) {
+        var previous = automationRunRepository.findByIdForUpdate(runId)
+                .orElseThrow(() -> new NoSuchElementException("Automation run not found."));
+        if (previous.getStatus() != AutomationRunStatus.HELD || previous.getResolutionStatus() != null) {
+            throw new IllegalStateException("Only unresolved held automation runs can be retried.");
+        }
+        var retry = start(
+                previous.getTopicId(),
+                null,
+                runId,
+                "RETRY",
+                "retry:%d:%s".formatted(runId, UUID.randomUUID()));
+        previous.markRetried(retry.run().getId());
+        auditService.record(
+                AuditActorType.ADMIN,
+                "1",
+                AuditTargetType.AUTOMATION,
+                runId.toString(),
+                "AUTOMATION_RUN_RETRIED",
+                Map.of("retryRunId", retry.run().getId()));
+        return new RetryResult(previous.getTopicId(), retry.run().getId(), retry.run().getLeaseExpiresAt());
+    }
+
+    public record RetryResult(Long topicId, Long runId, LocalDateTime leaseExpiresAt) {
     }
 
     private LocalDateTime now() {

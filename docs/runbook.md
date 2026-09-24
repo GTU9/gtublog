@@ -79,5 +79,7 @@ Docker Compose 기반 운영 환경이라면 추가로 아래를 확인합니다
 
 - [../compose.prod.yaml](../compose.prod.yaml)이 외부 MySQL 주소를 사용하도록 설정되었을 것
 - [../.env.production.example](../.env.production.example)을 복사한 실제 `.env.production`에 공개 오리진, 인증 키, worker token, revalidation secret이 채워져 있을 것
+- Spring `AUTOMATION_REVALIDATION_SHARED_SECRET`과 Next 서버 `GTUBLOG_REVALIDATION_SHARED_SECRET`이 같은 32바이트 이상 외부 비밀값을 쓰고 placeholder가 아닐 것. Compose는 전자를 후자에 주입한다.
 - reverse proxy 설정이 [../ops/nginx/production.conf](../ops/nginx/production.conf)와 같은 same-origin 라우팅 계약을 유지할 것
+- `/admin/automation`의 outbox 진단에서 `PENDING`, `IN_FLIGHT`, `DEAD_LETTER` 수와 시도 횟수·다음 처리 시각·안전한 실패 사유를 확인할 것. `DEAD_LETTER`는 자동 재시도 대상이 아니므로 원인을 확인한 뒤 별도 복구 절차로 처리한다.
 - 기본 Compose rehearsal은 `proxy`, `frontend`, `backend`만 기동한다. `generation-worker`는 `generation` profile과 외부 canary attestation 파일을 요구하므로 해당 release gate 승인 뒤에만 별도 기동할 것

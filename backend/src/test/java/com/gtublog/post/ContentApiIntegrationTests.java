@@ -87,9 +87,11 @@ class ContentApiIntegrationTests {
 
     @BeforeEach
     void resetState() {
+        jdbcTemplate.update("DELETE FROM post_revision_source_snapshot");
         jdbcTemplate.update("DELETE FROM post_tag");
         jdbcTemplate.update("DELETE FROM post_category");
         jdbcTemplate.update("DELETE FROM post_revision");
+        jdbcTemplate.update("DELETE FROM source_snapshot");
         jdbcTemplate.update("DELETE FROM post_view_counter");
         jdbcTemplate.update("DELETE FROM post");
         jdbcTemplate.update("DELETE FROM tag");
@@ -362,8 +364,371 @@ class ContentApiIntegrationTests {
                 });
     }
 
+    @Test
+    void publicPostDetailReturnsOnlyPostLinkedCitationsAndPreservesThemAfterManualEditAndRevisionRestore() throws Exception {
+        var bearerToken = bearerToken();
+        var categoryId = createCategory(bearerToken, "Citation Evidence");
+
+        var target = createPost(
+                bearerToken,
+                "citation-story",
+                "Citation story",
+                "Citation excerpt",
+                "Citation body",
+                List.of(categoryId),
+                List.of());
+        var other = createPost(
+                bearerToken,
+                "other-citation-story",
+                "Other citation story",
+                "Other citation excerpt",
+                "Other citation body",
+                List.of(categoryId),
+                List.of());
+        publishPost(bearerToken, target.id());
+        publishPost(bearerToken, other.id());
+
+        var targetRevisionId = revisionId(target.id(), 1);
+        var otherRevisionId = revisionId(other.id(), 1);
+        var targetSnapshotId = insertSourceSnapshot(
+                "11111111-1111-1111-1111-111111111111",
+                "https://news.example.com/story-23-citation",
+                "Primary cited source");
+        var otherSnapshotId = insertSourceSnapshot(
+                "22222222-2222-2222-2222-222222222222",
+                "https://news.example.com/unrelated-citation",
+                "Unrelated cited source");
+        linkCitation(targetRevisionId, targetSnapshotId, 1);
+        linkCitation(otherRevisionId, otherSnapshotId, 1);
+
+        assertPublicCitations(target.slug());
+
+        mockMvc.perform(put("/api/v1/admin/posts/{id}", target.id())
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "slug":"citation-story",
+                                  "title":"Citation story after edit",
+                                  "excerpt":"Citation excerpt after edit",
+                                  "contentMarkdown":"Citation body after edit",
+                                  "contentHtml":"<p>Citation body after edit</p>",
+                                  "categoryIds":[%d],
+                                  "revisionNote":"Manual edit should not detach citations"
+                                }
+                                """.formatted(categoryId)))
+                .andExpect(status().isOk());
+        assertPublicCitations(target.slug());
+
+        mockMvc.perform(post("/api/v1/admin/posts/{id}/revisions/{revisionNumber}/restore", target.id(), 1)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk());
+        assertPublicCitations(target.slug());
+    }
+
+    @Test
+    void publicSearchMatchesCategoryAndTagNamesWithoutDuplicateResults() throws Exception {
+        var bearerToken = bearerToken();
+        var matchingCategoryId = createCategory(bearerToken, "facetonly");
+        var secondMatchingCategoryId = createCategory(bearerToken, "facetonly extra");
+        var matchingTagId = createTag(bearerToken, "facetonly");
+
+        var target = createPost(
+                bearerToken,
+                "taxonomy-only-search",
+                "Neutral title",
+                "Neutral excerpt",
+                "Neutral body without taxonomy keyword",
+                List.of(matchingCategoryId, secondMatchingCategoryId),
+                List.of(matchingTagId));
+        publishPost(bearerToken, target.id());
+
+        mockMvc.perform(get("/api/v1/public/search")
+                        .queryParam("q", "facetonly")
+                        .queryParam("page", "0")
+                        .queryParam("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    var json = jsonBody(result);
+                    assertThat(json.get("totalElements").asLong()).isEqualTo(1L);
+                    assertThat(json.get("items")).hasSize(1);
+                    assertThat(json.at("/items/0/slug").asText()).isEqualTo(target.slug());
+                });
+    }
+
+    @Test
+    void publicSearchTreatsTaxonomyWildcardCharactersAsLiterals() throws Exception {
+        var bearerToken = bearerToken();
+        var percentCategoryId = createCategory(bearerToken, "literal%facet");
+        var plainCategoryId = createCategory(bearerToken, "plain facet");
+        var underscoreTagId = createTag(bearerToken, "literal_facet");
+
+        var percentPost = createPost(
+                bearerToken,
+                "percent-taxonomy-search",
+                "Percent neutral title",
+                "Neutral excerpt",
+                "Neutral body",
+                List.of(percentCategoryId),
+                List.of());
+        var underscorePost = createPost(
+                bearerToken,
+                "underscore-taxonomy-search",
+                "Underscore neutral title",
+                "Neutral excerpt",
+                "Neutral body",
+                List.of(plainCategoryId),
+                List.of(underscoreTagId));
+        var plainPost = createPost(
+                bearerToken,
+                "plain-taxonomy-search",
+                "Plain neutral title",
+                "Neutral excerpt",
+                "Neutral body",
+                List.of(plainCategoryId),
+                List.of());
+
+        publishPost(bearerToken, percentPost.id());
+        publishPost(bearerToken, underscorePost.id());
+        publishPost(bearerToken, plainPost.id());
+
+        mockMvc.perform(get("/api/v1/public/search")
+                        .queryParam("q", "%")
+                        .queryParam("page", "0")
+                        .queryParam("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    var json = jsonBody(result);
+                    assertThat(json.get("totalElements").asLong()).isEqualTo(1L);
+                    assertThat(json.at("/items/0/slug").asText()).isEqualTo(percentPost.slug());
+                });
+
+        mockMvc.perform(get("/api/v1/public/search")
+                        .queryParam("q", "_")
+                        .queryParam("page", "0")
+                        .queryParam("size", "20"))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    var json = jsonBody(result);
+                    assertThat(json.get("totalElements").asLong()).isEqualTo(1L);
+                    assertThat(json.at("/items/0/slug").asText()).isEqualTo(underscorePost.slug());
+                });
+    }
+
+    @Test
+    void publicArchiveMonthUsesUtcPublishedMonthAndOnlyPublicPosts() throws Exception {
+        var bearerToken = bearerToken();
+        var categoryId = createCategory(bearerToken, "Archive");
+
+        var firstMarch = createPost(bearerToken, "march-start", "March start", "March", "March", List.of(categoryId), List.of());
+        var secondMarch = createPost(bearerToken, "march-end", "March end", "March", "March", List.of(categoryId), List.of());
+        var april = createPost(bearerToken, "april-start", "April start", "April", "April", List.of(categoryId), List.of());
+        var deletedMarch = createPost(bearerToken, "deleted-march", "Deleted March", "Deleted", "Deleted", List.of(categoryId), List.of());
+        var draftMarch = createPost(bearerToken, "draft-march", "Draft March", "Draft", "Draft", List.of(categoryId), List.of());
+
+        publishPost(bearerToken, firstMarch.id());
+        publishPost(bearerToken, secondMarch.id());
+        publishPost(bearerToken, april.id());
+        publishPost(bearerToken, deletedMarch.id());
+        mockMvc.perform(post("/api/v1/admin/posts/{id}/delete", deletedMarch.id())
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk());
+
+        setFirstPublishedAt(firstMarch.id(), "2026-03-01 00:00:00.000000");
+        setFirstPublishedAt(secondMarch.id(), "2026-03-31 23:59:59.999000");
+        setFirstPublishedAt(april.id(), "2026-04-01 00:00:00.000000");
+        setFirstPublishedAt(deletedMarch.id(), "2026-03-15 12:00:00.000000");
+        setFirstPublishedAt(draftMarch.id(), "2026-03-20 12:00:00.000000");
+
+        mockMvc.perform(get("/api/v1/public/archive/{year}/{month}", 2026, 3)
+                        .queryParam("page", "0")
+                        .queryParam("size", "12"))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    var json = jsonBody(result);
+                    assertThat(json.get("totalElements").asLong()).isEqualTo(2L);
+                    assertThat(json.get("items")).hasSize(2);
+                    assertThat(json.at("/items/0/slug").asText()).isEqualTo(secondMarch.slug());
+                    assertThat(json.at("/items/1/slug").asText()).isEqualTo(firstMarch.slug());
+                    assertThat(result.getResponse().getContentAsString())
+                            .doesNotContain(april.slug(), deletedMarch.slug(), draftMarch.slug());
+                });
+    }
+
+    @Test
+    void adminPostStatsRequireAuthenticationAndCountAllRecordsIncludingDeleted() throws Exception {
+        var bearerToken = bearerToken();
+        var categoryId = createCategory(bearerToken, "Stats");
+
+        var draft = createPost(bearerToken, "stats-draft", "Stats draft", "Draft", "Draft", List.of(categoryId), List.of());
+        var published = createPost(bearerToken, "stats-published", "Stats published", "Published", "Published", List.of(categoryId), List.of());
+        var archived = createPost(bearerToken, "stats-archived", "Stats archived", "Archived", "Archived", List.of(categoryId), List.of());
+        var deleted = createPost(bearerToken, "stats-deleted", "Stats deleted", "Deleted", "Deleted", List.of(categoryId), List.of());
+
+        publishPost(bearerToken, published.id());
+        publishPost(bearerToken, archived.id());
+        mockMvc.perform(post("/api/v1/admin/posts/{id}/archive", archived.id())
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk());
+        publishPost(bearerToken, deleted.id());
+        mockMvc.perform(post("/api/v1/admin/posts/{id}/delete", deleted.id())
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/v1/admin/posts/stats"))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(get("/api/v1/admin/posts/stats")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    var json = jsonBody(result);
+                    assertThat(json.get("total").asLong()).isEqualTo(4L);
+                    assertThat(json.get("draft").asLong()).isEqualTo(1L);
+                    assertThat(json.get("published").asLong()).isEqualTo(1L);
+                    assertThat(json.get("archived").asLong()).isEqualTo(1L);
+                    assertThat(json.get("deleted").asLong()).isEqualTo(1L);
+                });
+
+        assertThat(draft.slug()).isEqualTo("stats-draft");
+    }
+
+    @Test
+    void publicPageRequestsRejectMalformedAndOverflowValues() throws Exception {
+        mockMvc.perform(get("/api/v1/public/posts")
+                        .queryParam("page", "not-a-number")
+                        .queryParam("size", "20"))
+                .andExpect(status().isBadRequest());
+
+        mockMvc.perform(get("/api/v1/public/search")
+                        .queryParam("q", "anything")
+                        .queryParam("page", "2147483647")
+                        .queryParam("size", "50"))
+                .andExpect(status().isBadRequest());
+    }
+
     private long taxonomyId(MvcResult result) throws Exception {
         return jsonBody(result).get("id").asLong();
+    }
+
+    private long createCategory(String bearerToken, String name) throws Exception {
+        return taxonomyId(mockMvc.perform(post("/api/v1/admin/taxonomy/categories")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"%s"}
+                                """.formatted(name)))
+                .andExpect(status().isCreated())
+                .andReturn());
+    }
+
+    private long createTag(String bearerToken, String name) throws Exception {
+        return taxonomyId(mockMvc.perform(post("/api/v1/admin/taxonomy/tags")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"%s"}
+                                """.formatted(name)))
+                .andExpect(status().isCreated())
+                .andReturn());
+    }
+
+    private TestPost createPost(
+            String bearerToken,
+            String slug,
+            String title,
+            String excerpt,
+            String contentMarkdown,
+            List<Long> categoryIds,
+            List<Long> tagIds) throws Exception {
+        var created = jsonBody(mockMvc.perform(post("/api/v1/admin/posts")
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "slug":"%s",
+                                  "title":"%s",
+                                  "excerpt":"%s",
+                                  "contentMarkdown":"%s",
+                                  "contentHtml":"<p>%s</p>",
+                                  "categoryIds":%s,
+                                  "tagIds":%s,
+                                  "revisionNote":"Story 23 regression setup"
+                                }
+                                """.formatted(
+                                        slug,
+                                        title,
+                                        excerpt,
+                                        contentMarkdown,
+                                        contentMarkdown,
+                                        idsJson(categoryIds),
+                                        idsJson(tagIds))))
+                .andExpect(status().isCreated())
+                .andReturn());
+        return new TestPost(created.get("id").asLong(), created.get("slug").asText());
+    }
+
+    private void publishPost(String bearerToken, long postId) throws Exception {
+        mockMvc.perform(post("/api/v1/admin/posts/{id}/publish", postId)
+                        .header(HttpHeaders.AUTHORIZATION, bearerToken))
+                .andExpect(status().isOk());
+    }
+
+    private long revisionId(long postId, int revisionNumber) {
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM post_revision WHERE post_id = ? AND revision_number = ?",
+                Long.class,
+                postId,
+                revisionNumber);
+    }
+
+    private long insertSourceSnapshot(String snapshotKey, String url, String title) {
+        jdbcTemplate.update(
+                """
+                INSERT INTO source_snapshot
+                    (snapshot_key, source_url, canonical_url, origin_host, title, retrieved_at, http_status, content_hash, policy_result, body_excerpt)
+                VALUES
+                    (?, ?, ?, 'news.example.com', ?, CURRENT_TIMESTAMP(6), 200, ?, 'ALLOWED', 'excerpt')
+                """,
+                snapshotKey,
+                url,
+                url,
+                title,
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM source_snapshot WHERE snapshot_key = ?",
+                Long.class,
+                snapshotKey);
+    }
+
+    private void linkCitation(long postRevisionId, long sourceSnapshotId, int citationOrder) {
+        jdbcTemplate.update(
+                "INSERT INTO post_revision_source_snapshot (post_revision_id, source_snapshot_id, citation_order) VALUES (?, ?, ?)",
+                postRevisionId,
+                sourceSnapshotId,
+                citationOrder);
+    }
+
+    private void assertPublicCitations(String slug) throws Exception {
+        mockMvc.perform(get("/api/v1/public/posts/{slug}", slug))
+                .andExpect(status().isOk())
+                .andExpect(result -> {
+                    var citations = jsonBody(result).get("citations");
+                    assertThat(citations).hasSize(1);
+                    assertThat(citations.get(0).get("url").asText()).isEqualTo("https://news.example.com/story-23-citation");
+                    assertThat(citations.get(0).get("title").asText()).isEqualTo("Primary cited source");
+                    assertThat(result.getResponse().getContentAsString()).doesNotContain("unrelated-citation");
+                });
+    }
+
+    private void setFirstPublishedAt(long postId, String publishedAt) {
+        jdbcTemplate.update("UPDATE post SET first_published_at = ? WHERE id = ?", publishedAt, postId);
+    }
+
+    private String idsJson(List<Long> ids) {
+        return ids == null || ids.isEmpty()
+                ? "[]"
+                : "[" + String.join(",", ids.stream().map(String::valueOf).toList()) + "]";
     }
 
     private void assertStoredHtmlIsSanitized(long postId) {
@@ -390,5 +755,8 @@ class ContentApiIntegrationTests {
                 .build();
         var token = jwtEncoder.encode(JwtEncoderParameters.from(JwsHeader.with(RS256).build(), claims)).getTokenValue();
         return "Bearer " + token;
+    }
+
+    private record TestPost(long id, String slug) {
     }
 }

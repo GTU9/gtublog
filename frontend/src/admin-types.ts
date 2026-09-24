@@ -58,6 +58,7 @@ export type AdminPostUpsertRequest = {
 
 export type AuditPage = PostPage<AuditEntryResponse>;
 export type AdminPostPage = PostPage<PostSummary>;
+export type AdminPostStats = { total: number; published: number; draft: number; archived: number; deleted: number };
 export type AdminPostDetail = PostDetail;
 
 export type AutomationTopicResponse = {
@@ -91,6 +92,48 @@ export type AutomationSourceUpsertRequest = {
   sourceType: string;
   sourceUrl: string;
   enabled: boolean;
+};
+
+export type AutomationOriginGroupResponse = {
+  id: number;
+  topicId: number;
+  name: string;
+  rationale: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AutomationOriginApprovalResponse = {
+  id: number;
+  sourceId: number;
+  originHost: string;
+  groupId: number;
+  groupName: string;
+  rationale: string;
+  revocationRationale: string | null;
+  active: boolean;
+  revision: number;
+  approvedAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AutomationOriginPairResponse = {
+  id: number;
+  topicId: number;
+  groupLowId: number;
+  groupHighId: number;
+  groupLowName: string;
+  groupHighName: string;
+  rationale: string;
+  revocationRationale: string | null;
+  active: boolean;
+  revision: number;
+  approvedAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type AutomationScheduleResponse = {
@@ -139,11 +182,24 @@ export type AutomationRunResponse = {
 
 export type AutomationRunDetailResponse = {
   run: AutomationRunResponse;
+  publicationDecision?: {
+    outcome: string;
+    holdReason: string | null;
+    detailReason: string | null;
+    decisionJson: string;
+    relations: {
+      leftSnapshotId: number;
+      rightSnapshotId: number;
+      relationType: string;
+      evidenceValue: string | null;
+    }[];
+  } | null;
   generatedDraft: {
     title: string;
     excerpt: string;
     contentMarkdown: string;
     citationSnapshotIds: number[];
+    taxonomy?: { categoryId: number; tagIds: number[] } | null;
   } | null;
   availableActions: {
     canRetry: boolean;
@@ -152,14 +208,27 @@ export type AutomationRunDetailResponse = {
   };
   snapshots: {
     id: number;
+    automationSourceId: number | null;
     sourceUrl: string;
+    sourceFeedUrl?: string | null;
+    fetchedUrl?: string | null;
     canonicalUrl: string;
     originHost: string;
     title: string;
     httpStatus: number;
     policyResult: string;
     contentHash: string;
+    bodyTextHash?: string | null;
+    lineageExtractionStatus?: string | null;
+    explicitUpstreamUrls?: string[];
     retrievedAt: string;
+  }[];
+  originPairs?: {
+    pairApprovalId: number;
+    approvalRevision: number;
+    groupLowId: number;
+    groupHighId: number;
+    capturedAt: string;
   }[];
 };
 
@@ -177,6 +246,9 @@ export type AutomationOutboxResponse = {
   availableAt: string | null;
   processedAt: string | null;
   lastAttemptAt: string | null;
+  attemptCount: number;
+  leaseExpiresAt: string | null;
+  failureReason: string | null;
   createdAt: string;
 };
 
@@ -196,6 +268,8 @@ export type AutomationDiagnosticsResponse = {
   outboxCounts: {
     pending: number;
     delivered: number;
+    inFlight: number;
+    deadLetter: number;
   };
   heldSnapshotCount: number;
   recentHoldReasons: string[];

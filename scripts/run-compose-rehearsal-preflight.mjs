@@ -18,6 +18,9 @@ const missing = requiredVariables.filter((name) => !values.get(name)?.trim());
 const placeholders = requiredVariables.filter((name) => /replace-with|example\.com/i.test(values.get(name) ?? ""));
 if (missing.length > 0) throw new Error(`Compose rehearsal environment is missing required values: ${missing.join(", ")}`);
 if (placeholders.length > 0) throw new Error(`Compose rehearsal environment still contains placeholder values: ${placeholders.join(", ")}`);
+if (Buffer.byteLength(values.get("AUTOMATION_REVALIDATION_SHARED_SECRET"), "utf8") < 32) {
+  throw new Error("AUTOMATION_REVALIDATION_SHARED_SECRET must be at least 32 UTF-8 bytes.");
+}
 if (values.get("GENERATION_CODEX_ENV_ISOLATION_APPROVED") === "true") {
   throw new Error("The rehearsal preflight refuses GENERATION_CODEX_ENV_ISOLATION_APPROVED=true. Codex approval belongs to the separate canary-attestation release gate.");
 }

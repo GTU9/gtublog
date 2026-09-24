@@ -26,8 +26,10 @@ public class AutomationAdminService {
 
     private final AutomationTopicRepository automationTopicRepository;
     private final AutomationSourceRepository automationSourceRepository;
+    private final AutomationOriginApprovalRepository originApprovalRepository;
     private final AutomationScheduleRepository automationScheduleRepository;
     private final AutomationRunRepository automationRunRepository;
+    private final AutomationRunOriginPairRepository automationRunOriginPairRepository;
     private final SourceSnapshotRepository sourceSnapshotRepository;
     private final SlugService slugService;
     private final AuditService auditService;
@@ -41,13 +43,17 @@ public class AutomationAdminService {
     private final AutomationRunRecoveryService automationRunRecoveryService;
     private final AutomationRunRecoveryTransaction automationRunRecoveryTransaction;
     private final AutomationPublicationService automationPublicationService;
+    private final AutomationPublicationDecisionRepository automationPublicationDecisionRepository;
+    private final AutomationSourceRelationDiagnosticRepository automationSourceRelationDiagnosticRepository;
     private final ObjectMapper objectMapper;
 
     public AutomationAdminService(
             AutomationTopicRepository automationTopicRepository,
             AutomationSourceRepository automationSourceRepository,
+            AutomationOriginApprovalRepository originApprovalRepository,
             AutomationScheduleRepository automationScheduleRepository,
             AutomationRunRepository automationRunRepository,
+            AutomationRunOriginPairRepository automationRunOriginPairRepository,
             SourceSnapshotRepository sourceSnapshotRepository,
             SlugService slugService,
             AuditService auditService,
@@ -61,11 +67,15 @@ public class AutomationAdminService {
             AutomationRunRecoveryService automationRunRecoveryService,
             AutomationRunRecoveryTransaction automationRunRecoveryTransaction,
             AutomationPublicationService automationPublicationService,
+            AutomationPublicationDecisionRepository automationPublicationDecisionRepository,
+            AutomationSourceRelationDiagnosticRepository automationSourceRelationDiagnosticRepository,
             ObjectMapper objectMapper) {
         this.automationTopicRepository = automationTopicRepository;
         this.automationSourceRepository = automationSourceRepository;
+        this.originApprovalRepository = originApprovalRepository;
         this.automationScheduleRepository = automationScheduleRepository;
         this.automationRunRepository = automationRunRepository;
+        this.automationRunOriginPairRepository = automationRunOriginPairRepository;
         this.sourceSnapshotRepository = sourceSnapshotRepository;
         this.slugService = slugService;
         this.auditService = auditService;
@@ -79,6 +89,8 @@ public class AutomationAdminService {
         this.automationRunRecoveryService = automationRunRecoveryService;
         this.automationRunRecoveryTransaction = automationRunRecoveryTransaction;
         this.automationPublicationService = automationPublicationService;
+        this.automationPublicationDecisionRepository = automationPublicationDecisionRepository;
+        this.automationSourceRelationDiagnosticRepository = automationSourceRelationDiagnosticRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -127,9 +139,17 @@ public class AutomationAdminService {
 
     @Transactional
     public AutomationSourceResponse updateSource(Long sourceId, AutomationSourceRequest request) {
-        var source = automationSourceRepository.findById(sourceId).orElseThrow(() -> new NoSuchElementException("Automation source not found."));
+        var source = automationSourceRepository.findLockedById(sourceId).orElseThrow(() -> new NoSuchElementException("Automation source not found."));
         var sourceUrl = sourceUrlPolicy.validateStoredUrl(request.sourceUrl()).toASCIIString();
         ensureUniqueSource(source.getTopicId(), sourceUrl, sourceId);
+        if (source.getSourceType() != request.sourceType() || !source.getSourceUrl().equals(sourceUrl)) {
+            var revoked = originApprovalRepository.revokeAllActiveBySourceId(sourceId);
+            if (revoked > 0) {
+                auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, sourceId.toString(),
+                        "ORIGIN_APPROVALS_INVALIDATED", Map.of("sourceId", sourceId, "count", revoked,
+                                "reason", "Source URL or type changed."));
+            }
+        }
         source.update(request.sourceType(), sourceUrl, request.enabled());
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, source.getId().toString(), "AUTOMATION_SOURCE_UPDATED", Map.of("topicId", source.getTopicId()));
         return toSourceResponse(source);
@@ -137,10 +157,14 @@ public class AutomationAdminService {
 
     @Transactional
     public void deleteSource(Long sourceId) {
-        var source = automationSourceRepository.findById(sourceId).orElseThrow(() -> new NoSuchElementException("Automation source not found."));
+        var source = automationSourceRepository.findLockedById(sourceId).orElseThrow(() -> new NoSuchElementException("Automation source not found."));
         if (sourceSnapshotRepository.existsByAutomationSourceId(sourceId)) {
             throw new AutomationConfigurationConflictException(
                     "This source is already referenced by collected evidence. Disable it instead of deleting it.");
+        }
+        if (originApprovalRepository.existsBySourceId(sourceId)) {
+            throw new AutomationConfigurationConflictException(
+                    "This source has origin approval history. Disable it instead of deleting it.");
         }
         automationSourceRepository.delete(source);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, sourceId.toString(), "AUTOMATION_SOURCE_DELETED", Map.of());
@@ -210,19 +234,26 @@ public class AutomationAdminService {
         var snapshots = sourceSnapshotRepository.findAllByAutomationRunIdOrderByCreatedAtAsc(runId).stream()
                 .map(snapshot -> new AutomationRunDetailResponse.SourceSnapshotResponse(
                         snapshot.getId(),
+                        snapshot.getAutomationSourceId(),
                         snapshot.getSourceUrl(),
+                        snapshot.getFetchedUrl(),
                         snapshot.getCanonicalUrl(),
                         snapshot.getOriginHost(),
                         snapshot.getTitle(),
                         snapshot.getHttpStatus(),
                         snapshot.getPolicyResult(),
                         snapshot.getContentHash(),
+                        snapshot.getBodyTextHash(),
+                        snapshot.getLineageExtractionStatus(),
+                        explicitUpstreamUrls(snapshot.getExplicitUpstreamUrlsJson()),
                         snapshot.getRetrievedAt()))
                 .toList();
         var generatedDraft = generatedDraft(runId);
         return new AutomationRunDetailResponse(
                 toRunResponse(run),
                 snapshots,
+                originPairCaptures(runId),
+                publicationDecision(runId),
                 generatedDraft,
                 new AutomationRunDetailResponse.AvailableActionsResponse(
                         canRetry(run),
@@ -230,33 +261,39 @@ public class AutomationAdminService {
                         canOverridePublish(run, generatedDraft)));
     }
 
+    private List<AutomationRunDetailResponse.OriginPairCaptureResponse> originPairCaptures(Long runId) {
+        return automationRunOriginPairRepository.findAllByRunIdOrderByIdAsc(runId).stream()
+                .map(pair -> new AutomationRunDetailResponse.OriginPairCaptureResponse(
+                        pair.getPairApprovalId(),
+                        pair.getApprovalRevision(),
+                        pair.getGroupLowId(),
+                        pair.getGroupHighId(),
+                        pair.getCapturedAt()))
+                .toList();
+    }
+
     @Transactional
     public AutomationRunRecoveryResponse recoverRun(Long runId) {
         return new AutomationRunRecoveryResponse(runId, automationRunRecoveryTransaction.recover(runId, automationRunRepository.currentDatabaseUtc()));
     }
 
-    @Transactional
     public AutomationRunResponse retryHeldRun(Long runId) {
-        var run = automationRunRepository.findByIdForUpdate(runId).orElseThrow(() -> new NoSuchElementException("Automation run not found."));
-        if (!canRetry(run)) {
-            throw new IllegalStateException("Only unresolved held automation runs can be retried.");
-        }
-        var retried = createOrReuseRun(run.getTopicId(), null, runId, "RETRY", "retry:%d:%s".formatted(runId, UUID.randomUUID()));
-        run.markRetried(retried.run().getId());
-        auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, runId.toString(), "AUTOMATION_RUN_RETRIED", Map.of("retryRunId", retried.run().getId()));
-        var enabledSources = automationSourceRepository.findAllByTopicIdAndEnabledTrueOrderByIdAsc(run.getTopicId());
+        var retried = automationRunLifecycleService.startRetry(runId);
+        var enabledSources = automationSourceRepository.findAllByTopicIdAndEnabledTrueOrderByIdAsc(retried.topicId());
         if (enabledSources.isEmpty()) {
-            automationRunLifecycleService.hold(retried.run().getId(), AutomationHoldReason.NO_ENABLED_SOURCES);
-            return runDetail(retried.run().getId()).run();
+            automationRunLifecycleService.hold(retried.runId(), AutomationHoldReason.NO_ENABLED_SOURCES);
+            return runDetail(retried.runId()).run();
         }
-        var result = sourceCollectionService.collect(run.getTopicId(), retried.run().getId(), enabledSources);
+        var result = sourceCollectionService.collect(
+                retried.topicId(), retried.runId(), enabledSources, retried.leaseExpiresAt());
         if (result.holdReason() == null) {
-            var topic = automationTopicRepository.findById(run.getTopicId()).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
-            generationJobService.enqueueForRun(topic, retried.run(), result.snapshots());
+            var topic = automationTopicRepository.findById(retried.topicId()).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
+            var activeRun = automationRunRepository.findById(retried.runId()).orElseThrow(() -> new NoSuchElementException("Automation run not found."));
+            generationJobService.enqueueForRun(topic, activeRun, result.snapshots());
         } else {
-            automationRunLifecycleService.hold(retried.run().getId(), result.holdReason());
+            automationRunLifecycleService.hold(retried.runId(), result.holdReason());
         }
-        return runDetail(retried.run().getId()).run();
+        return runDetail(retried.runId()).run();
     }
 
     @Transactional
@@ -283,7 +320,8 @@ public class AutomationAdminService {
         }
         var job = generationJobRepository.findByRunIdForUpdate(runId)
                 .orElseThrow(() -> new NoSuchElementException("Generation job not found for the held automation run."));
-        var response = automationPublicationService.publishAdminOverride(job, run, draft);
+        var response = automationPublicationService.publishAdminOverride(
+                job, run, draft, generationJobService.catalogForJob(job));
         run.markOverridePublished(response.postId());
         return response;
     }
@@ -307,7 +345,9 @@ public class AutomationAdminService {
                         generationJobService.countByStatus(GenerationJobStatus.FAILED)),
                 new AutomationDiagnosticsResponse.OutboxCounts(
                         publicationOutboxService.countByStatus("PENDING"),
-                        publicationOutboxService.countByStatus("DELIVERED")),
+                        publicationOutboxService.countByStatus("DELIVERED"),
+                        publicationOutboxService.countByStatus("IN_FLIGHT"),
+                        publicationOutboxService.countByStatus("DEAD_LETTER")),
                 sourceSnapshotRepository.countByPolicyResult(SourcePolicyResult.HELD),
                 recentHoldReasons,
                 LocalDateTime.now(ZoneOffset.UTC));
@@ -318,7 +358,6 @@ public class AutomationAdminService {
         return publicationOutboxService.recentEvents();
     }
 
-    @Transactional
     public void processOutbox() {
         publicationOutboxService.processPendingEvents();
     }
@@ -356,7 +395,8 @@ public class AutomationAdminService {
             return runDetail(creation.run().getId()).run();
         }
 
-        var result = sourceCollectionService.collect(topicId, creation.run().getId(), enabledSources);
+        var result = sourceCollectionService.collect(
+                topicId, creation.run().getId(), enabledSources, creation.run().getLeaseExpiresAt());
         if (result.holdReason() == null) {
             var topic = automationTopicRepository.findById(topicId).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
             generationJobService.enqueueForRun(topic, creation.run(), result.snapshots());
@@ -382,6 +422,7 @@ public class AutomationAdminService {
 
     private AutomationRunDetailResponse.GeneratedDraftResponse generatedDraft(Long runId) {
         return generationJobRepository.findByRunId(runId)
+                .filter(job -> !"automation-job-v4".equals(job.getSchemaVersion()))
                 .filter(job -> job.getResultPayloadJson() != null && !job.getResultPayloadJson().isBlank())
                 .map(job -> {
                     try {
@@ -400,16 +441,66 @@ public class AutomationAdminService {
                                 citationIds.add(Long.parseLong(text));
                             }
                         }
+                        GenerationJobSubmitRequest.TaxonomySelection taxonomy = null;
+                        var taxonomyNode = payload.path("taxonomy");
+                        if (!taxonomyNode.isMissingNode() && !taxonomyNode.isNull()) {
+                            List<Long> tagIds = new ArrayList<>();
+                            for (var tagNode : taxonomyNode.withArray("tagIds")) {
+                                tagIds.add(tagNode.longValue());
+                            }
+                            taxonomy = new GenerationJobSubmitRequest.TaxonomySelection(
+                                    taxonomyNode.path("categoryId").longValue(), tagIds);
+                        }
                         return new AutomationRunDetailResponse.GeneratedDraftResponse(
                                 payload.path("title").asText(),
                                 payload.path("excerpt").asText(),
                                 payload.path("contentMarkdown").asText(),
-                                citationIds);
+                                citationIds,
+                                taxonomy);
                     } catch (Exception exception) {
                         throw new IllegalStateException("Could not deserialize the stored automation draft.", exception);
                     }
                 })
                 .orElse(null);
+    }
+
+    private AutomationRunDetailResponse.PublicationDecisionResponse publicationDecision(Long runId) {
+        return automationPublicationDecisionRepository.findByRunId(runId)
+                .map(decision -> new AutomationRunDetailResponse.PublicationDecisionResponse(
+                        decision.getOutcome(),
+                        decision.getHoldReason(),
+                        decision.getDetailReason(),
+                        decision.getDecisionJson(),
+                        automationSourceRelationDiagnosticRepository.findAllByRunIdOrderByIdAsc(runId).stream()
+                                .map(relation -> new AutomationRunDetailResponse.SourceRelationDiagnosticResponse(
+                                        relation.getLeftSnapshotId(),
+                                        relation.getRightSnapshotId(),
+                                        relation.getRelationType(),
+                                        relation.getEvidenceValue()))
+                                .toList()))
+                .orElse(null);
+    }
+
+    private List<String> explicitUpstreamUrls(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            var node = objectMapper.readTree(json);
+            if (!node.isArray()) {
+                return List.of();
+            }
+            var urls = new ArrayList<String>();
+            for (var urlNode : node) {
+                var value = urlNode.asText();
+                if (value != null && !value.isBlank()) {
+                    urls.add(value);
+                }
+            }
+            return List.copyOf(urls);
+        } catch (Exception exception) {
+            return List.of();
+        }
     }
 
     private boolean canRetry(AutomationRun run) {
@@ -424,8 +515,12 @@ public class AutomationAdminService {
         if (run.getStatus() != AutomationRunStatus.HELD || run.getResolutionStatus() != null || draft == null) {
             return false;
         }
-        return AutomationHoldReason.AUTOMATIC_PUBLICATION_DISABLED.equals(run.getHoldReason())
-                || AutomationHoldReason.INSUFFICIENT_ORIGINS.equals(run.getHoldReason());
+        if (!(AutomationHoldReason.AUTOMATIC_PUBLICATION_DISABLED.equals(run.getHoldReason())
+                || AutomationHoldReason.INSUFFICIENT_ORIGINS.equals(run.getHoldReason()))) {
+            return false;
+        }
+        var job = generationJobRepository.findByRunId(run.getId()).orElse(null);
+        return job != null && generationJobService.selectionInJobCatalog(job, draft.taxonomy());
     }
 
     private String uniqueTopicSlug(String providedSlug, String fallbackName, Long currentId) {

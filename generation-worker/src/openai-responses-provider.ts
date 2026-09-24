@@ -1,4 +1,4 @@
-import { generationDraftJsonSchema, validateGenerationDraft } from "./draft-schema.js";
+import { generationDraftJsonSchema, generationDraftJsonSchemaV3, generationObservationJsonSchemaV4, validateGenerationDraft } from "./draft-schema.js";
 import type { GenerationProvider, GenerationRequest, GenerationResult } from "./provider.js";
 
 const responsesEndpoint = "https://api.openai.com/v1/responses";
@@ -27,6 +27,21 @@ export function createOpenAIResponsesGenerationProvider(options: OpenAIResponses
   return {
     name: "openai-responses",
     async generate(request: GenerationRequest, signal?: AbortSignal): Promise<GenerationResult> {
+      const input = request.schemaVersion === "automation-job-v4"
+        ? [
+            request.prompt,
+            "",
+            `Choose taxonomy IDs only from this approved catalog: ${JSON.stringify(request.taxonomyCatalog)}`,
+            "Return JSON with only top-level observations and taxonomy.",
+            "Each observation must have kind SOURCE_MENTION, a 20-160 character literal copied from source text, and exactly two different citationSnapshotIds.",
+            "Do not return title, excerpt, contentMarkdown, markdown, HTML, or prose.",
+          ].join("\n")
+        : request.schemaVersion === "automation-job-v3"
+          ? `${request.prompt}\n\nChoose taxonomy IDs only from this approved catalog: ${JSON.stringify(request.taxonomyCatalog)}`
+          : request.prompt;
+      const schema = request.schemaVersion === "automation-job-v4"
+        ? generationObservationJsonSchemaV4
+        : request.schemaVersion === "automation-job-v3" ? generationDraftJsonSchemaV3 : generationDraftJsonSchema;
       let response: Response;
       try {
         response = await fetchImplementation(endpoint, {
@@ -37,16 +52,16 @@ export function createOpenAIResponsesGenerationProvider(options: OpenAIResponses
           },
           body: JSON.stringify({
             model: options.model,
-            input: request.prompt,
+            input,
             tools: [],
             tool_choice: "none",
             store: false,
             text: {
               format: {
                 type: "json_schema",
-                name: "generation_draft",
+                name: request.schemaVersion === "automation-job-v4" ? "source_observations" : "generation_draft",
                 strict: true,
-                schema: generationDraftJsonSchema,
+                schema,
               },
             },
           }),
@@ -77,7 +92,7 @@ export function createOpenAIResponsesGenerationProvider(options: OpenAIResponses
       if (!outputText) throw new Error("OpenAI Responses returned no structured draft.");
 
       try {
-        return validateGenerationDraft(JSON.parse(outputText) as unknown, "openai-responses");
+        return validateGenerationDraft(JSON.parse(outputText) as unknown, "openai-responses", request.schemaVersion);
       } catch (error) {
         if (error instanceof SyntaxError) throw new Error("OpenAI Responses returned malformed structured output.");
         throw error;

@@ -63,8 +63,14 @@ app:
       shared-token: ${AUTOMATION_WORKER_SHARED_TOKEN:}
       lease-duration: ${AUTOMATION_WORKER_LEASE_DURATION:PT5M}
       preferred-provider: ${AUTOMATION_WORKER_PROVIDER:codex-sdk}
-      schema-version: ${AUTOMATION_WORKER_SCHEMA_VERSION:automation-job-v2}
+      schema-version: ${AUTOMATION_WORKER_SCHEMA_VERSION:automation-job-v3}
     revalidation:
       base-url: ${AUTOMATION_REVALIDATION_BASE_URL:}
       shared-secret: ${AUTOMATION_REVALIDATION_SHARED_SECRET:}
-      retry-delay: ${AUTOMATION_REVALIDATION_RETRY_DELAY:PT1M}
+      retry-initial-delay: ${AUTOMATION_REVALIDATION_RETRY_INITIAL_DELAY:PT30S}
+      retry-max-delay: ${AUTOMATION_REVALIDATION_RETRY_MAX_DELAY:PT15M}
+      request-timeout: ${AUTOMATION_REVALIDATION_REQUEST_TIMEOUT:PT5S}
+      lease-duration: ${AUTOMATION_REVALIDATION_LEASE_DURATION:PT30S}
+      poll-interval: ${AUTOMATION_REVALIDATION_POLL_INTERVAL:PT30S}
+      max-attempts: ${AUTOMATION_REVALIDATION_MAX_ATTEMPTS:5}
+      batch-size: ${AUTOMATION_REVALIDATION_BATCH_SIZE:20}

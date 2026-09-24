@@ -13,6 +13,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 @RestControllerAdvice
 class ApiExceptionHandler {
@@ -67,6 +68,11 @@ class ApiExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     ProblemDetail handleInvalidMethodArgument(MethodArgumentNotValidException exception) {
         return problemDetail(HttpStatus.BAD_REQUEST, "Bad request", "The request body violates the API contract.");
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    ProblemDetail handleArgumentTypeMismatch(MethodArgumentTypeMismatchException exception) {
+        return problemDetail(HttpStatus.BAD_REQUEST, "Bad request", "The request parameters violate the API contract.");
     }
 
     @ExceptionHandler(com.gtublog.automation.TerminalSubmissionConflictException.class)

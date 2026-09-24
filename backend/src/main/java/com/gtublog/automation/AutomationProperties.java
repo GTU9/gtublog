@@ -45,7 +45,30 @@ public record AutomationProperties(
 
     public record RevalidationProperties(
             String baseUrl,
-            @NotBlank String sharedSecret,
-            @NotNull Duration retryDelay) {
+            String sharedSecret,
+            @NotNull Duration retryInitialDelay,
+            @NotNull Duration retryMaxDelay,
+            @NotNull Duration requestTimeout,
+            @NotNull Duration leaseDuration,
+            @NotNull Duration pollInterval,
+            int maxAttempts,
+            int batchSize) {
+
+        public RevalidationProperties {
+            RunProperties.requirePositive(retryInitialDelay, "retryInitialDelay");
+            RunProperties.requirePositive(retryMaxDelay, "retryMaxDelay");
+            RunProperties.requirePositive(requestTimeout, "requestTimeout");
+            RunProperties.requirePositive(leaseDuration, "leaseDuration");
+            RunProperties.requirePositive(pollInterval, "pollInterval");
+            if (retryMaxDelay != null && retryInitialDelay != null && retryMaxDelay.compareTo(retryInitialDelay) < 0) {
+                throw new IllegalArgumentException("retryMaxDelay must not be shorter than retryInitialDelay.");
+            }
+            if (maxAttempts < 1) {
+                throw new IllegalArgumentException("maxAttempts must be at least one.");
+            }
+            if (batchSize < 1) {
+                throw new IllegalArgumentException("batchSize must be at least one.");
+            }
+        }
     }
 }

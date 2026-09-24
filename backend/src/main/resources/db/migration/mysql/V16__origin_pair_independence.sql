@@ -1,0 +1,43 @@
+CREATE TABLE automation_origin_pair_approval (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    topic_id BIGINT NOT NULL,
+    group_low_id BIGINT NOT NULL,
+    group_high_id BIGINT NOT NULL,
+    rationale VARCHAR(1000) NOT NULL,
+    revocation_rationale VARCHAR(1000) NULL,
+    active BOOLEAN NOT NULL,
+    revision BIGINT NOT NULL,
+    approved_at DATETIME(6) NOT NULL,
+    revoked_at DATETIME(6) NULL,
+    active_slot TINYINT GENERATED ALWAYS AS (CASE WHEN active THEN 1 ELSE NULL END) STORED,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT fk_origin_pair_topic FOREIGN KEY (topic_id) REFERENCES automation_topic (id),
+    CONSTRAINT fk_origin_pair_group_low FOREIGN KEY (group_low_id) REFERENCES automation_origin_group (id),
+    CONSTRAINT fk_origin_pair_group_high FOREIGN KEY (group_high_id) REFERENCES automation_origin_group (id),
+    CONSTRAINT ck_origin_pair_order CHECK (group_low_id < group_high_id),
+    CONSTRAINT uk_origin_pair_active UNIQUE (topic_id, group_low_id, group_high_id, active_slot),
+    INDEX ix_origin_pair_topic (topic_id, id),
+    INDEX ix_origin_pair_group_low (group_low_id),
+    INDEX ix_origin_pair_group_high (group_high_id)
+);
+
+CREATE TABLE automation_run_origin_pair (
+    id BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    run_id BIGINT NOT NULL,
+    pair_approval_id BIGINT NOT NULL,
+    approval_revision BIGINT NOT NULL,
+    group_low_id BIGINT NOT NULL,
+    group_high_id BIGINT NOT NULL,
+    captured_at DATETIME(6) NOT NULL,
+    created_at DATETIME(6) NOT NULL,
+    updated_at DATETIME(6) NOT NULL,
+    CONSTRAINT fk_run_origin_pair_run FOREIGN KEY (run_id) REFERENCES automation_run (id),
+    CONSTRAINT fk_run_origin_pair_approval FOREIGN KEY (pair_approval_id) REFERENCES automation_origin_pair_approval (id),
+    CONSTRAINT fk_run_origin_pair_group_low FOREIGN KEY (group_low_id) REFERENCES automation_origin_group (id),
+    CONSTRAINT fk_run_origin_pair_group_high FOREIGN KEY (group_high_id) REFERENCES automation_origin_group (id),
+    CONSTRAINT ck_run_origin_pair_order CHECK (group_low_id < group_high_id),
+    CONSTRAINT uk_run_origin_pair_approval UNIQUE (run_id, pair_approval_id),
+    INDEX ix_run_origin_pair_run (run_id, id),
+    INDEX ix_run_origin_pair_groups (group_low_id, group_high_id)
+);
