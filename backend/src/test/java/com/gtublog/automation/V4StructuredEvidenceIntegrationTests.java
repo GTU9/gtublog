@@ -12,6 +12,7 @@ import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.Options;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import java.net.URI;
+import java.sql.DriverManager;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,7 +24,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.flywaydb.core.Flyway;
@@ -45,6 +48,8 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.context.WebApplicationContext;
 import org.testcontainers.mysql.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
@@ -106,6 +111,7 @@ class V4StructuredEvidenceIntegrationTests {
     @Autowired private OriginApprovalAdminService originApprovalAdminService;
     @Autowired private OriginPairAdminService originPairAdminService;
     @Autowired private GenerationJobRepository generationJobRepository;
+    @Autowired private PlatformTransactionManager transactionManager;
 
     private MockMvc mockMvc;
 
@@ -199,6 +205,146 @@ class V4StructuredEvidenceIntegrationTests {
                 job.getId());
         assertThat(storedPayload).contains("\"observations\"");
         assertThat(storedPayload).doesNotContain("contentMarkdown").doesNotContain("\"draft\"");
+    }
+
+    @Test
+    void outboxInsertFailureRollsBackV4PublicationAndSameTerminalRetrySucceeds() throws Exception {
+        var job = seedApprovedVerifiedV4Job("outbox-rollback", LITERAL);
+        var claim = claim("worker-v4-outbox-rollback");
+        var body = observationBody("worker-v4-outbox-rollback", LITERAL, claimSnapshotIds(claim));
+        int auditCountBeforeSubmit = count("audit_entry");
+
+        try (var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), "root", MYSQL.getPassword());
+             var statement = connection.createStatement()) {
+            statement.execute("SET GLOBAL log_bin_trust_function_creators = 1");
+        }
+        jdbcTemplate.execute("""
+                CREATE TRIGGER reject_v4_outbox BEFORE INSERT ON publication_outbox_event
+                FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'forced v4 outbox failure'
+                """);
+        try {
+            mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
+                            .header(GenerationWorkerController.WORKER_TOKEN_HEADER, workerToken())
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isInternalServerError());
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT status FROM automation_run WHERE id = ?", String.class, job.getRunId()))
+                    .isEqualTo("RUNNING");
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT job_status FROM generation_job WHERE id = ?", String.class, job.getId()))
+                    .isEqualTo("CLAIMED");
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT terminal_submission_id FROM generation_job WHERE id = ?", String.class, job.getId()))
+                    .isNull();
+            for (String table : List.of(
+                    "post", "post_revision", "post_revision_source_snapshot", "post_category", "post_tag",
+                    "automation_publication_claim", "automation_publication_decision",
+                    "automation_source_relation_diagnostic",
+                    "publication_outbox_event")) {
+                assertThat(count(table)).as(table).isZero();
+            }
+            assertThat(count("audit_entry")).isEqualTo(auditCountBeforeSubmit);
+        } finally {
+            jdbcTemplate.execute("DROP TRIGGER IF EXISTS reject_v4_outbox");
+        }
+
+        submit(job.getId(), body);
+        assertPublishedObservationCard(job, LITERAL);
+        submit(job.getId(), body);
+        assertThat(count("post")).isEqualTo(1);
+        assertThat(count("automation_publication_claim")).isEqualTo(3);
+        assertThat(count("publication_outbox_event")).isEqualTo(1);
+        assertThat(count("audit_entry")).isEqualTo(auditCountBeforeSubmit + 2);
+    }
+
+    @Test
+    void pairRevocationCommittedWhileV4SubmitWaitsOnTopicLockHoldsWithoutPublication() throws Exception {
+        assertPairRevocationAndV4SubmitSerialize(true);
+    }
+
+    @Test
+    void v4SubmitCommittedBeforePairRevocationPublishesOnce() throws Exception {
+        assertPairRevocationAndV4SubmitSerialize(false);
+    }
+
+    private void assertPairRevocationAndV4SubmitSerialize(boolean revokeFirst) throws Exception {
+        var name = revokeFirst ? "revoke-before-submit" : "submit-before-revoke";
+        var workerId = "worker-v4-" + name;
+        var job = seedApprovedVerifiedV4Job(name, LITERAL);
+        var claim = claim(workerId);
+        var body = observationBody(workerId, LITERAL, claimSnapshotIds(claim));
+        long topicId = jdbcTemplate.queryForObject(
+                "SELECT topic_id FROM automation_run WHERE id = ?", Long.class, job.getRunId());
+        long pairId = jdbcTemplate.queryForObject(
+                "SELECT pair_approval_id FROM automation_run_origin_pair WHERE run_id = ?", Long.class, job.getRunId());
+        int auditCountBeforeRace = count("audit_entry");
+
+        Callable<Object> submitAction = () -> submit(job.getId(), body);
+        Callable<Object> revokeAction = () -> originPairAdminService.revoke(
+                pairId, new OriginPairRevokeRequest(1L, "Pair revoked during terminal submission."));
+        assertContendedCommitOrder(
+                "automation_topic", topicId,
+                revokeFirst ? revokeAction : submitAction,
+                revokeFirst ? submitAction : revokeAction);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT active FROM automation_origin_pair_approval WHERE id = ?", Boolean.class, pairId)).isFalse();
+        if (revokeFirst) {
+            assertHeldWithoutPublication(job);
+            assertThat(count("automation_publication_claim")).isZero();
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT outcome FROM automation_publication_decision WHERE run_id = ?", String.class, job.getRunId()))
+                    .isEqualTo("held");
+            assertThat(count("audit_entry")).isEqualTo(auditCountBeforeRace + 2);
+        } else {
+            assertPublishedObservationCard(job, LITERAL);
+            assertThat(count("automation_publication_claim")).isEqualTo(3);
+            assertThat(count("audit_entry")).isEqualTo(auditCountBeforeRace + 3);
+        }
+    }
+
+    @Test
+    void sourceRevocationCommittedBeforeV4SubmitHoldsWithoutPublication() throws Exception {
+        assertSourceRevocationAndV4SubmitSerialize(true);
+    }
+
+    @Test
+    void v4SubmitCommittedBeforeSourceRevocationPublishesOnce() throws Exception {
+        assertSourceRevocationAndV4SubmitSerialize(false);
+    }
+
+    private void assertSourceRevocationAndV4SubmitSerialize(boolean revokeFirst) throws Exception {
+        var name = revokeFirst ? "source-revoke-before-submit" : "submit-before-source-revoke";
+        var workerId = "worker-v4-" + name;
+        var job = seedApprovedVerifiedV4Job(name, LITERAL);
+        var claim = claim(workerId);
+        var body = observationBody(workerId, LITERAL, claimSnapshotIds(claim));
+        var firstSnapshot = snapshotRows(job.getRunId()).getFirst();
+        long sourceId = ((Number) firstSnapshot.get("automation_source_id")).longValue();
+        long approvalId = ((Number) firstSnapshot.get("origin_approval_id")).longValue();
+        int auditCountBeforeRace = count("audit_entry");
+
+        Callable<Object> submitAction = () -> submit(job.getId(), body);
+        Callable<Object> revokeAction = () -> originApprovalAdminService.revoke(
+                approvalId, new OriginApprovalRevokeRequest(1L, "Source revoked during terminal submission."));
+        assertContendedCommitOrder(
+                "automation_source", sourceId,
+                revokeFirst ? revokeAction : submitAction,
+                revokeFirst ? submitAction : revokeAction);
+
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT active FROM automation_origin_approval WHERE id = ?", Boolean.class, approvalId)).isFalse();
+        if (revokeFirst) {
+            assertHeldWithoutPublication(job);
+            assertDecisionDetail(job.getRunId(), "ORIGIN_APPROVAL_NOT_CURRENT");
+            assertThat(count("automation_publication_claim")).isZero();
+            assertThat(count("audit_entry")).isEqualTo(auditCountBeforeRace + 2);
+        } else {
+            assertPublishedObservationCard(job, LITERAL);
+            assertThat(count("automation_publication_claim")).isEqualTo(3);
+            assertThat(count("audit_entry")).isEqualTo(auditCountBeforeRace + 3);
+        }
     }
 
     @Test
@@ -1099,6 +1245,75 @@ class V4StructuredEvidenceIntegrationTests {
 
     private Long latestRunId() {
         return jdbcTemplate.queryForObject("SELECT id FROM automation_run ORDER BY id DESC LIMIT 1", Long.class);
+    }
+
+    private int count(String table) {
+        return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
+    }
+
+    private void assertContendedCommitOrder(
+            String table, long rowId, Callable<Object> firstAction, Callable<Object> secondAction) throws Exception {
+        var firstApplied = new CountDownLatch(1);
+        var allowFirstCommit = new CountDownLatch(1);
+        try (var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), MYSQL.getUsername(), MYSQL.getPassword());
+             var executor = Executors.newFixedThreadPool(2)) {
+            connection.setAutoCommit(false);
+            try (var lock = connection.prepareStatement("SELECT id FROM " + table + " WHERE id = ? FOR UPDATE")) {
+                lock.setLong(1, rowId);
+                assertThat(lock.executeQuery().next()).isTrue();
+            }
+            try {
+                var first = executor.submit(() -> new TransactionTemplate(transactionManager).execute(status -> {
+                    try {
+                        var result = firstAction.call();
+                        firstApplied.countDown();
+                        if (!allowFirstCommit.await(20, TimeUnit.SECONDS)) {
+                            throw new AssertionError("First action was not released to commit.");
+                        }
+                        return result;
+                    } catch (Exception exception) {
+                        throw new IllegalStateException(exception);
+                    }
+                }));
+                awaitRowLockWait(table);
+                connection.commit();
+                assertThat(firstApplied.await(20, TimeUnit.SECONDS)).isTrue();
+
+                var second = executor.submit(secondAction);
+                awaitRowLockWait(table);
+                allowFirstCommit.countDown();
+                assertThat(first.get(20, TimeUnit.SECONDS)).isNotNull();
+                assertThat(second.get(20, TimeUnit.SECONDS)).isNotNull();
+            } finally {
+                allowFirstCommit.countDown();
+                connection.rollback();
+            }
+        }
+    }
+
+    private void awaitRowLockWait(String table) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        try (var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), "root", MYSQL.getPassword());
+             var statement = connection.prepareStatement("""
+                     SELECT COUNT(*)
+                     FROM performance_schema.data_lock_waits waits
+                     JOIN performance_schema.data_locks requested
+                       ON requested.ENGINE_LOCK_ID = waits.REQUESTING_ENGINE_LOCK_ID
+                     WHERE requested.OBJECT_NAME = ?
+                       AND requested.LOCK_STATUS = 'WAITING'
+                     """)) {
+            statement.setString(1, table);
+            while (System.nanoTime() < deadline) {
+                try (var rows = statement.executeQuery()) {
+                    assertThat(rows.next()).isTrue();
+                    if (rows.getInt(1) >= 1) {
+                        return;
+                    }
+                }
+                Thread.sleep(25);
+            }
+        }
+        throw new AssertionError("Expected a MySQL row lock waiter on " + table);
     }
 
     private List<Map<String, Object>> snapshotRows(Long runId) {
