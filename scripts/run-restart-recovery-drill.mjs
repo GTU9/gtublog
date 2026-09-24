@@ -307,6 +307,10 @@ function terminalPayloadDigest(requestWithoutDigest) {
         excerpt: normalize(requestWithoutDigest.draft.excerpt),
         contentMarkdown: normalize(requestWithoutDigest.draft.contentMarkdown),
         citationSnapshotIds: [...requestWithoutDigest.draft.citationSnapshotIds].sort((a, b) => a - b),
+        taxonomy: {
+          categoryId: requestWithoutDigest.draft.taxonomy.categoryId,
+          tagIds: [...requestWithoutDigest.draft.taxonomy.tagIds].sort((a, b) => a - b),
+        },
       }
     : null;
   const canonical = JSON.stringify({
@@ -324,6 +328,16 @@ function terminalPayloadDigest(requestWithoutDigest) {
 async function createPublishedAutomationRun(token) {
   const slugSuffix = Date.now().toString(36);
   const expectedTitle = `Restart Drill Published Post ${slugSuffix}`;
+  const category = await api("/api/v1/admin/taxonomy/categories", {
+    method: "POST",
+    token,
+    body: { name: `Restart Drill Category ${slugSuffix}`, slug: `restart-drill-category-${slugSuffix}` },
+  });
+  const tag = await api("/api/v1/admin/taxonomy/tags", {
+    method: "POST",
+    token,
+    body: { name: `Restart Drill Tag ${slugSuffix}`, slug: `restart-drill-tag-${slugSuffix}` },
+  });
   const topic = await api("/api/v1/admin/automation/topics", {
     method: "POST",
     token,
@@ -368,6 +382,11 @@ async function createPublishedAutomationRun(token) {
   if (!Array.isArray(claim.snapshots) || claim.snapshots.length < 2) {
     throw new Error("Expected two collected snapshots for the publish drill run.");
   }
+  if (claim.schemaVersion !== "automation-job-v3"
+      || !claim.taxonomyCatalog.categories.some((item) => item.id === category.id)
+      || !claim.taxonomyCatalog.tags.some((item) => item.id === tag.id)) {
+    throw new Error("Expected the v3 claim to include the drill category and tag.");
+  }
 
   const requestWithoutDigest = {
     terminalSubmissionId: randomUUID(),
@@ -380,8 +399,8 @@ async function createPublishedAutomationRun(token) {
       excerpt: "Published during the restart recovery drill.",
       contentMarkdown: `# ${expectedTitle}\n\nRestart drill content.`,
       citationSnapshotIds: claim.snapshots.map((snapshot) => snapshot.snapshotId),
+      taxonomy: { categoryId: category.id, tagIds: [tag.id] },
     },
-    failureReason: null,
   };
   const submitBody = {
     ...requestWithoutDigest,
@@ -479,11 +498,12 @@ async function claimGenerationJob(runId) {
     body: JSON.stringify({
       workerId: "restart-drill-worker",
       supportedProviders: ["codex-sdk", "fake-provider"],
-      supportedSchemaVersions: ["automation-job-v2"],
+      supportedSchemaVersions: ["automation-job-v3"],
     }),
   });
   if (response.status !== 200) {
-    throw new Error(`Worker claim failed with ${response.status}.`);
+    const state = executeSql(`SELECT CONCAT(ar.status, '|', gj.job_status, '|', gj.schema_version, '|', COALESCE(ar.hold_reason, '')) FROM automation_run ar JOIN generation_job gj ON gj.run_id = ar.id WHERE ar.id = ${runId}`);
+    throw new Error(`Worker claim failed with ${response.status}; run/job state: ${state}.`);
   }
   const claim = await response.json();
   if (claim.runId !== runId) {

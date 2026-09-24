@@ -19,6 +19,7 @@
 - `pnpm --dir frontend lint`, `typecheck`, `test`, `build`: 통과. 7 files, 39 tests.
 - Playwright 단독 브라우저 테스트: 8/8 통과. Windows에서 Playwright가 직접 띄운 dev server 종료가 지연되어 서버를 별도 실행한 뒤 테스트 명령을 정상 종료시켜 확인했다.
 - `node scripts/run-fullstack-e2e.mjs` (`E2E_MYSQL_PORT=13307`): Spring/MySQL/Next 2/2 통과.
+- `node scripts/run-restart-recovery-drill.mjs` (별도 15316/18286/13206/19196 포트): CI에서 이전 v2 수신 계약으로 204가 발생한 뒤 v3 분류 후보·제출 형식으로 갱신했다. 로컬에서 연속 2회 종료 코드 0으로 재시작, 공개 발행, outbox 재처리, 만료 작업 복구를 확인했다.
 - `docker compose config --quiet`, `docker compose -f compose.prod.yaml config --quiet`, `git diff --check`: 통과.
 
 ## 검토와 운영 범위
