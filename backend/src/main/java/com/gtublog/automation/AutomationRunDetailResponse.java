@@ -28,6 +28,7 @@ public record AutomationRunDetailResponse(
 
     public record SourceSnapshotResponse(
             Long id,
+            Long automationSourceId,
             String sourceUrl,
             String fetchedUrl,
             String canonicalUrl,

@@ -18,9 +18,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminAutomationController {
 
     private final AutomationAdminService automationAdminService;
+    private final OriginApprovalAdminService originApprovalAdminService;
 
-    public AdminAutomationController(AutomationAdminService automationAdminService) {
+    public AdminAutomationController(AutomationAdminService automationAdminService,
+                                     OriginApprovalAdminService originApprovalAdminService) {
         this.automationAdminService = automationAdminService;
+        this.originApprovalAdminService = originApprovalAdminService;
     }
 
     @GetMapping("/topics")
@@ -59,6 +62,36 @@ public class AdminAutomationController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteSource(@PathVariable Long sourceId) {
         automationAdminService.deleteSource(sourceId);
+    }
+
+    @GetMapping("/topics/{topicId}/origin-groups")
+    public List<OriginGroupResponse> originGroups(@PathVariable Long topicId) {
+        return originApprovalAdminService.groups(topicId);
+    }
+
+    @PostMapping("/topics/{topicId}/origin-groups")
+    @ResponseStatus(HttpStatus.CREATED)
+    public OriginGroupResponse createOriginGroup(@PathVariable Long topicId,
+                                                 @Valid @RequestBody OriginGroupRequest request) {
+        return originApprovalAdminService.createGroup(topicId, request);
+    }
+
+    @GetMapping("/sources/{sourceId}/origin-approvals")
+    public List<OriginApprovalResponse> originApprovals(@PathVariable Long sourceId) {
+        return originApprovalAdminService.approvals(sourceId);
+    }
+
+    @PostMapping("/sources/{sourceId}/origin-approvals")
+    @ResponseStatus(HttpStatus.CREATED)
+    public OriginApprovalResponse approveOrigin(@PathVariable Long sourceId,
+                                                @Valid @RequestBody OriginApprovalRequest request) {
+        return originApprovalAdminService.approve(sourceId, request);
+    }
+
+    @PostMapping("/origin-approvals/{approvalId}/revoke")
+    public OriginApprovalResponse revokeOrigin(@PathVariable Long approvalId,
+                                               @Valid @RequestBody OriginApprovalRevokeRequest request) {
+        return originApprovalAdminService.revoke(approvalId, request);
     }
 
     @GetMapping("/topics/{topicId}/schedules")

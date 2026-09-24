@@ -3,7 +3,6 @@ package com.gtublog.automation;
 import com.gtublog.observability.PlatformMetricsService;
 import com.gtublog.source.SourcePolicyResult;
 import com.gtublog.source.SourceSnapshot;
-import com.gtublog.source.SourceSnapshotRepository;
 import com.rometools.rome.feed.synd.SyndEntry;
 import com.rometools.rome.feed.synd.SyndFeed;
 import com.rometools.rome.feed.synd.SyndLink;
@@ -50,32 +49,24 @@ public class SourceCollectionService {
     private static final String COLLECTION_TIMEOUT_REASON = "Source collection timed out before the run lease.";
     private static final Pattern UNSAFE_XML_DECLARATION =
             Pattern.compile("<!\\s*(?:doctype|entity)\\b", Pattern.CASE_INSENSITIVE);
-    private final SourceSnapshotRepository sourceSnapshotRepository;
     private final PlatformMetricsService platformMetricsService;
     private final SourceUrlPolicy sourceUrlPolicy;
     private final PinnedSourceHttpClient sourceHttpClient;
     private final ObjectMapper objectMapper;
+    private final SourceSnapshotEvidenceService snapshotEvidenceService;
 
     @Autowired
     public SourceCollectionService(
-            SourceSnapshotRepository sourceSnapshotRepository,
             PlatformMetricsService platformMetricsService,
             SourceUrlPolicy sourceUrlPolicy,
             PinnedSourceHttpClient sourceHttpClient,
-            ObjectMapper objectMapper) {
-        this.sourceSnapshotRepository = sourceSnapshotRepository;
+            ObjectMapper objectMapper,
+            SourceSnapshotEvidenceService snapshotEvidenceService) {
         this.platformMetricsService = platformMetricsService;
         this.sourceUrlPolicy = sourceUrlPolicy;
         this.sourceHttpClient = sourceHttpClient;
         this.objectMapper = objectMapper;
-    }
-
-    SourceCollectionService(
-            SourceSnapshotRepository sourceSnapshotRepository,
-            PlatformMetricsService platformMetricsService,
-            SourceUrlPolicy sourceUrlPolicy,
-            PinnedSourceHttpClient sourceHttpClient) {
-        this(sourceSnapshotRepository, platformMetricsService, sourceUrlPolicy, sourceHttpClient, new ObjectMapper());
+        this.snapshotEvidenceService = snapshotEvidenceService;
     }
 
     public CollectionResult collect(Long topicId, Long runId, List<AutomationSource> sources) {
@@ -286,7 +277,7 @@ public class SourceCollectionService {
                             null,
                             null,
                             CollectionDeadline.uncapped()),
-                    source.getSourceType());
+                    source);
         } catch (Exception exception) {
             return saveFailureSnapshot(topicId, runId, source, articleUrl, fallbackTitle, exception);
         }
@@ -707,7 +698,7 @@ public class SourceCollectionService {
             String sourceUrl,
             String title,
             Exception exception) {
-        return saveSnapshot(buildFailureSnapshot(topicId, runId, source, sourceUrl, title, exception), source.getSourceType());
+        return saveSnapshot(buildFailureSnapshot(topicId, runId, source, sourceUrl, title, exception), source);
     }
 
     private SourceSnapshot buildFailureSnapshot(
@@ -748,7 +739,7 @@ public class SourceCollectionService {
                         sourceFeedUrl,
                         sourceFeedEntryKey,
                         exception),
-                source.getSourceType());
+                source);
     }
 
     private SourceSnapshot buildFailureFeedEntrySnapshot(
@@ -786,7 +777,7 @@ public class SourceCollectionService {
             String reason) {
         return saveSnapshot(
                 buildHeldSnapshot(topicId, runId, source, sourceUrl, canonicalUrl, originHost, title, httpStatus, reason),
-                source.getSourceType());
+                source);
     }
 
     private SourceSnapshot buildHeldSnapshot(
@@ -849,7 +840,7 @@ public class SourceCollectionService {
                         sourceFeedEntryKey,
                         httpStatus,
                         reason),
-                source.getSourceType());
+                source);
     }
 
     private SourceSnapshot buildHeldFeedEntrySnapshot(
@@ -957,9 +948,9 @@ public class SourceCollectionService {
                 : value.substring(0, MAX_FEED_ENTRY_KEY_LENGTH);
     }
 
-    private SourceSnapshot saveSnapshot(SourceSnapshot snapshot, AutomationSourceType sourceType) {
-        var saved = sourceSnapshotRepository.save(snapshot);
-        platformMetricsService.recordSourceSnapshot(saved.getPolicyResult().name(), sourceType.name());
+    private SourceSnapshot saveSnapshot(SourceSnapshot snapshot, AutomationSource source) {
+        var saved = snapshotEvidenceService.save(snapshot, source);
+        platformMetricsService.recordSourceSnapshot(saved.getPolicyResult().name(), source.getSourceType().name());
         return saved;
     }
 
@@ -1049,27 +1040,27 @@ public class SourceCollectionService {
                 return;
             }
             if (snapshots.size() < MAX_RUN_SNAPSHOTS - 1) {
-                snapshots.add(saveSnapshot(snapshot, sourceType));
+                snapshots.add(saveSnapshot(snapshot, overflowSource));
                 return;
             }
             if (snapshots.size() == MAX_RUN_SNAPSHOTS - 1 && moreWorkAfter) {
-                pendingSnapshot = new PendingSnapshot(snapshot, sourceType);
+                pendingSnapshot = new PendingSnapshot(snapshot, overflowSource);
                 return;
             }
             if (snapshots.size() < MAX_RUN_SNAPSHOTS) {
-                snapshots.add(saveSnapshot(snapshot, sourceType));
+                snapshots.add(saveSnapshot(snapshot, overflowSource));
             }
         }
 
         private void flushPending() {
             if (!overflowed && pendingSnapshot != null) {
-                snapshots.add(saveSnapshot(pendingSnapshot.snapshot(), pendingSnapshot.sourceType()));
+                snapshots.add(saveSnapshot(pendingSnapshot.snapshot(), pendingSnapshot.source()));
                 pendingSnapshot = null;
             }
         }
     }
 
-    private record PendingSnapshot(SourceSnapshot snapshot, AutomationSourceType sourceType) {
+    private record PendingSnapshot(SourceSnapshot snapshot, AutomationSource source) {
     }
 
     private record ArticleLineage(String status, List<String> upstreamUrls) {

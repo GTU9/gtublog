@@ -44,6 +44,15 @@ public class SourceSnapshot extends BaseEntity {
     @Column(name = "origin_host", nullable = false, length = 255)
     private String originHost;
 
+    @Column(name = "origin_approval_id")
+    private Long originApprovalId;
+
+    @Column(name = "origin_approval_revision")
+    private Long originApprovalRevision;
+
+    @Column(name = "origin_group_id")
+    private Long originGroupId;
+
     @Column(name = "title", length = 255)
     private String title;
 
@@ -281,6 +290,19 @@ public class SourceSnapshot extends BaseEntity {
     public String getOriginHost() {
         return originHost;
     }
+
+    public void captureOriginApproval(Long approvalId, long revision, Long groupId) {
+        if (originApprovalId != null || policyResult != SourcePolicyResult.ALLOWED || httpStatus < 200 || httpStatus >= 300) {
+            throw new IllegalStateException("Origin approval can only be captured once on a successful article snapshot.");
+        }
+        originApprovalId = approvalId;
+        originApprovalRevision = revision;
+        originGroupId = groupId;
+    }
+
+    public Long getOriginApprovalId() { return originApprovalId; }
+    public Long getOriginApprovalRevision() { return originApprovalRevision; }
+    public Long getOriginGroupId() { return originGroupId; }
 
     public String getTitle() {
         return title;

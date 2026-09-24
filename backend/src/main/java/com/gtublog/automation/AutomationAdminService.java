@@ -26,6 +26,7 @@ public class AutomationAdminService {
 
     private final AutomationTopicRepository automationTopicRepository;
     private final AutomationSourceRepository automationSourceRepository;
+    private final AutomationOriginApprovalRepository originApprovalRepository;
     private final AutomationScheduleRepository automationScheduleRepository;
     private final AutomationRunRepository automationRunRepository;
     private final SourceSnapshotRepository sourceSnapshotRepository;
@@ -48,6 +49,7 @@ public class AutomationAdminService {
     public AutomationAdminService(
             AutomationTopicRepository automationTopicRepository,
             AutomationSourceRepository automationSourceRepository,
+            AutomationOriginApprovalRepository originApprovalRepository,
             AutomationScheduleRepository automationScheduleRepository,
             AutomationRunRepository automationRunRepository,
             SourceSnapshotRepository sourceSnapshotRepository,
@@ -68,6 +70,7 @@ public class AutomationAdminService {
             ObjectMapper objectMapper) {
         this.automationTopicRepository = automationTopicRepository;
         this.automationSourceRepository = automationSourceRepository;
+        this.originApprovalRepository = originApprovalRepository;
         this.automationScheduleRepository = automationScheduleRepository;
         this.automationRunRepository = automationRunRepository;
         this.sourceSnapshotRepository = sourceSnapshotRepository;
@@ -133,9 +136,17 @@ public class AutomationAdminService {
 
     @Transactional
     public AutomationSourceResponse updateSource(Long sourceId, AutomationSourceRequest request) {
-        var source = automationSourceRepository.findById(sourceId).orElseThrow(() -> new NoSuchElementException("Automation source not found."));
+        var source = automationSourceRepository.findLockedById(sourceId).orElseThrow(() -> new NoSuchElementException("Automation source not found."));
         var sourceUrl = sourceUrlPolicy.validateStoredUrl(request.sourceUrl()).toASCIIString();
         ensureUniqueSource(source.getTopicId(), sourceUrl, sourceId);
+        if (source.getSourceType() != request.sourceType() || !source.getSourceUrl().equals(sourceUrl)) {
+            var revoked = originApprovalRepository.revokeAllActiveBySourceId(sourceId);
+            if (revoked > 0) {
+                auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, sourceId.toString(),
+                        "ORIGIN_APPROVALS_INVALIDATED", Map.of("sourceId", sourceId, "count", revoked,
+                                "reason", "Source URL or type changed."));
+            }
+        }
         source.update(request.sourceType(), sourceUrl, request.enabled());
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, source.getId().toString(), "AUTOMATION_SOURCE_UPDATED", Map.of("topicId", source.getTopicId()));
         return toSourceResponse(source);
@@ -143,10 +154,14 @@ public class AutomationAdminService {
 
     @Transactional
     public void deleteSource(Long sourceId) {
-        var source = automationSourceRepository.findById(sourceId).orElseThrow(() -> new NoSuchElementException("Automation source not found."));
+        var source = automationSourceRepository.findLockedById(sourceId).orElseThrow(() -> new NoSuchElementException("Automation source not found."));
         if (sourceSnapshotRepository.existsByAutomationSourceId(sourceId)) {
             throw new AutomationConfigurationConflictException(
                     "This source is already referenced by collected evidence. Disable it instead of deleting it.");
+        }
+        if (originApprovalRepository.existsBySourceId(sourceId)) {
+            throw new AutomationConfigurationConflictException(
+                    "This source has origin approval history. Disable it instead of deleting it.");
         }
         automationSourceRepository.delete(source);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, sourceId.toString(), "AUTOMATION_SOURCE_DELETED", Map.of());
@@ -216,6 +231,7 @@ public class AutomationAdminService {
         var snapshots = sourceSnapshotRepository.findAllByAutomationRunIdOrderByCreatedAtAsc(runId).stream()
                 .map(snapshot -> new AutomationRunDetailResponse.SourceSnapshotResponse(
                         snapshot.getId(),
+                        snapshot.getAutomationSourceId(),
                         snapshot.getSourceUrl(),
                         snapshot.getFetchedUrl(),
                         snapshot.getCanonicalUrl(),
