@@ -19,11 +19,14 @@ public class AdminAutomationController {
 
     private final AutomationAdminService automationAdminService;
     private final OriginApprovalAdminService originApprovalAdminService;
+    private final OriginPairAdminService originPairAdminService;
 
     public AdminAutomationController(AutomationAdminService automationAdminService,
-                                     OriginApprovalAdminService originApprovalAdminService) {
+                                     OriginApprovalAdminService originApprovalAdminService,
+                                     OriginPairAdminService originPairAdminService) {
         this.automationAdminService = automationAdminService;
         this.originApprovalAdminService = originApprovalAdminService;
+        this.originPairAdminService = originPairAdminService;
     }
 
     @GetMapping("/topics")
@@ -92,6 +95,24 @@ public class AdminAutomationController {
     public OriginApprovalResponse revokeOrigin(@PathVariable Long approvalId,
                                                @Valid @RequestBody OriginApprovalRevokeRequest request) {
         return originApprovalAdminService.revoke(approvalId, request);
+    }
+
+    @GetMapping("/topics/{topicId}/origin-pairs")
+    public List<OriginPairResponse> originPairs(@PathVariable Long topicId) {
+        return originPairAdminService.pairs(topicId);
+    }
+
+    @PostMapping("/topics/{topicId}/origin-pairs")
+    @ResponseStatus(HttpStatus.CREATED)
+    public OriginPairResponse approveOriginPair(@PathVariable Long topicId,
+                                                @Valid @RequestBody OriginPairRequest request) {
+        return originPairAdminService.approve(topicId, request);
+    }
+
+    @PostMapping("/origin-pairs/{pairId}/revoke")
+    public OriginPairResponse revokeOriginPair(@PathVariable Long pairId,
+                                               @Valid @RequestBody OriginPairRevokeRequest request) {
+        return originPairAdminService.revoke(pairId, request);
     }
 
     @GetMapping("/topics/{topicId}/schedules")

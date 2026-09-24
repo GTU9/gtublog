@@ -12,9 +12,12 @@ import {
   mockAutomationRunRetry,
   mockAutomationSources,
   mockAutomationOriginApprovals,
+  mockAutomationOriginPairs,
   mockCreateAutomationOriginApproval,
   mockCreateAutomationOriginGroup,
+  mockCreateAutomationOriginPair,
   mockRevokeAutomationOriginApproval,
+  mockRevokeAutomationOriginPair,
   mockAutomationTopics,
   mockTriggerAutomationRun,
   mockDeleteAutomationSchedule,
@@ -63,6 +66,42 @@ describe("admin mock state", () => {
     expect(revoked.rationale).toBe("Byline and editorial ownership reviewed");
     expect(revoked.revocationRationale).toBe("Ownership changed");
     expect(() => mockRevokeAutomationOriginApproval(approval.id, { revision: 1, rationale: "Stale" })).toThrow();
+  });
+
+  it("records topic-scoped origin group pair approvals and captures them at run start", () => {
+    const first = mockCreateAutomationOriginGroup(1, { name: "Original reporting", rationale: "Separate editorial desk" });
+    const second = mockCreateAutomationOriginGroup(1, { name: "Wire review", rationale: "Separate ownership" });
+    const pair = mockCreateAutomationOriginPair(1, {
+      firstGroupId: second.id,
+      secondGroupId: first.id,
+      rationale: "No shared editorial control",
+    });
+
+    expect(pair.groupLowId).toBe(first.id);
+    expect(pair.groupHighId).toBe(second.id);
+    expect(mockAutomationOriginPairs(1)).toHaveLength(1);
+    expect(() => mockCreateAutomationOriginPair(1, {
+      firstGroupId: first.id,
+      secondGroupId: second.id,
+      rationale: "Duplicate",
+    })).toThrow();
+
+    const run = mockTriggerAutomationRun(1);
+    expect(mockAutomationRunDetail(run.id)?.originPairs).toEqual([
+      expect.objectContaining({
+        pairApprovalId: pair.id,
+        approvalRevision: 1,
+        groupLowId: first.id,
+        groupHighId: second.id,
+      }),
+    ]);
+
+    const revoked = mockRevokeAutomationOriginPair(pair.id, { revision: pair.revision, rationale: "Syndication contract changed" });
+    expect(revoked.active).toBe(false);
+    expect(revoked.revision).toBe(2);
+    expect(revoked.revocationRationale).toBe("Syndication contract changed");
+    expect(mockAutomationRunDetail(run.id)?.originPairs?.[0]?.approvalRevision).toBe(1);
+    expect(() => mockRevokeAutomationOriginPair(pair.id, { revision: 1, rationale: "Stale" })).toThrow();
   });
 
   it("creates drafts and tracks them in the admin listing", () => {

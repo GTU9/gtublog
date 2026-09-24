@@ -85,6 +85,8 @@ v2 terminal request는 UUID와 canonical UTF-8 JSON의 SHA-256 digest를 함께 
 
 새로 수집한 스냅샷은 수집 당시 유효한 승인 ID, revision, 그룹 ID만 고정해서 기록합니다. 나중에 승인하거나 취소해도 과거 스냅샷은 변경되지 않습니다. 승인되지 않은 호스트와 과거 스냅샷은 이 증거가 없습니다. 그룹이 서로 다르거나 호스트가 다르다는 사실만으로 독립성을 인정하지 않으며, 이 승인 기능만으로 자동 발행을 재개하지 않습니다. 별도의 그룹 간 독립성 승인, 정형 주장 검증, 공유 계보 차단, 중복 방어가 완성될 때까지 v3 생성 글은 계속 보류됩니다.
 
+관리자는 같은 주제에 속한 서로 다른 출처 그룹 두 개의 편집상 독립성을 별도로 승인·취소할 수 있습니다. 승인에는 원래 근거와 취소 근거, revision을 남기고 실행이 새로 시작될 때 활성 승인 목록을 그 실행의 정책 기록으로 고정합니다. 실행을 같은 idempotency key로 다시 요청해도 기존 기록은 바뀌지 않으며, 새 재시도 실행은 새 시점의 정책을 기록합니다. 실행 상세에서 이 정책 기록을 확인할 수 있습니다. 그룹 쌍 승인 역시 기사 내용의 진실이나 알려지지 않은 재배포 관계를 보증하지 않습니다. 후속 자동 발행 게이트가 현재도 유효한 source-host 승인과 그룹 쌍 승인, 공유 계보 및 주장 증거를 모두 확인하기 전에는 v3 보류를 해제하지 않습니다.
+
 Codex SDK production 실행은 의도적으로 동결되어 있습니다. 현재 `GENERATION_CODEX_CANARY_ATTESTATION_PATH`의 v1 JSON과 `artifactDigest` 일치는 **이미지 동일성 확인일 뿐 운영 승인 근거가 아닙니다**. host mount JSON에는 발급자, 서명, 신선도, 독립 재시작 증명이 없으므로 어떤 local smoke나 candidate canary도 이를 `result: passed`로 바꾸어 worker를 활성화해서는 안 됩니다. 기존 boolean 플래그는 test process에서만 허용됩니다. 상세 결정은 [CR-002](./change-requests/CR-002-block-codex-sdk-production-adapter.md)를 따릅니다.
 
 CR-003의 `openai-responses` provider는 Codex CLI나 agent tool process를 실행하지 않는 별도 선택 경로입니다. `GENERATION_PROVIDER=openai-responses`, `OPENAI_API_KEY`, `GENERATION_OPENAI_RESPONSES_MODEL`을 외부 설정으로 모두 제공해야만 선택되며, 요청은 `tools: []`, `tool_choice: "none"`, `store: false`, strict JSON Schema를 고정합니다. 이 선택은 Spring의 발행 게이트를 우회하지 않으며 실제 운영 API 호출과 배포 smoke는 별도 release story에서 승인·검증합니다.
