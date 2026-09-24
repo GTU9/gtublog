@@ -181,7 +181,7 @@ class GenerationTaxonomyIntegrationTests {
     }
 
     @Test
-    void v3ClaimPinsOrderedTaxonomyAndPublishesAllLinksAtomically() throws Exception {
+    void v3ClaimPinsOrderedTaxonomyAndOverridePublishesAllLinksAtomically() throws Exception {
         long categoryId = category("technology", "Technology");
         long firstTagId = tag("java", "Java");
         long secondTagId = tag("spring", "Spring");
@@ -198,7 +198,17 @@ class GenerationTaxonomyIntegrationTests {
         assertThat(result.get("status").asText()).isEqualTo("SUBMITTED");
 
         assertThat(jdbcTemplate.queryForObject("SELECT status FROM automation_run WHERE id = ?", String.class, job.getRunId()))
-                .isEqualTo("SUCCEEDED");
+                .isEqualTo("HELD");
+        assertThat(jdbcTemplate.queryForObject("SELECT hold_reason FROM automation_run WHERE id = ?", String.class, job.getRunId()))
+                .isEqualTo(AutomationHoldReason.INSUFFICIENT_ORIGINS);
+        assertThat(count("post")).isZero();
+        assertThat(count("post_revision")).isZero();
+        assertThat(count("post_revision_source_snapshot")).isZero();
+        assertThat(count("post_category")).isZero();
+        assertThat(count("post_tag")).isZero();
+        assertThat(count("publication_outbox_event")).isZero();
+
+        assertThat(automationAdminService.overridePublishHeldRun(job.getRunId()).postId()).isPositive();
         assertThat(count("post")).isEqualTo(1);
         assertThat(count("post_revision")).isEqualTo(1);
         assertThat(count("post_revision_source_snapshot")).isEqualTo(2);
@@ -296,11 +306,14 @@ class GenerationTaxonomyIntegrationTests {
     }
 
     @Test
-    void failureAfterTaxonomyLinksRollsBackEntirePublication() throws Exception {
+    void failureAfterTaxonomyLinksRollsBackEntireOverridePublication() throws Exception {
         long categoryId = category("technology", "Technology");
         long tagId = tag("java", "Java");
         var job = seedGenerationJob();
         var claim = claim("worker-outbox-rollback");
+        submit(job.getId(), draftBody("worker-outbox-rollback", claim, categoryId, List.of(tagId)));
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM automation_run WHERE id = ?", String.class, job.getRunId()))
+                .isEqualTo("HELD");
         try (var connection = DriverManager.getConnection(MYSQL.getJdbcUrl(), "root", MYSQL.getPassword());
                 var statement = connection.createStatement()) {
             statement.execute("SET GLOBAL log_bin_trust_function_creators = 1");
@@ -310,13 +323,13 @@ class GenerationTaxonomyIntegrationTests {
                 FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'forced outbox failure'
                 """);
         try {
-            mockMvc.perform(post("/api/v2/internal/generation-jobs/{jobId}/submit", job.getId())
-                            .header(GenerationWorkerController.WORKER_TOKEN_HEADER, "worker-test-token")
-                            .contentType(MediaType.APPLICATION_JSON)
-                            .content(draftBody("worker-outbox-rollback", claim, categoryId, List.of(tagId))))
-                    .andExpect(status().is5xxServerError());
+            org.assertj.core.api.Assertions.assertThatThrownBy(
+                            () -> automationAdminService.overridePublishHeldRun(job.getRunId()))
+                    .isInstanceOf(RuntimeException.class);
             assertThat(generationJobRepository.findById(job.getId()).orElseThrow().getJobStatus())
-                    .isEqualTo(GenerationJobStatus.CLAIMED);
+                    .isEqualTo(GenerationJobStatus.SUBMITTED);
+            assertThat(jdbcTemplate.queryForObject("SELECT status FROM automation_run WHERE id = ?", String.class, job.getRunId()))
+                    .isEqualTo("HELD");
             assertThat(count("post")).isZero();
             assertThat(count("post_revision")).isZero();
             assertThat(count("post_category")).isZero();

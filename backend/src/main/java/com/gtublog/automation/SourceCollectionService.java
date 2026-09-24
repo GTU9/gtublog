@@ -20,15 +20,18 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.Arrays;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.Element;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class SourceCollectionService {
@@ -40,6 +43,8 @@ public class SourceCollectionService {
     private static final int MAX_SNAPSHOT_SOURCE_URL_LENGTH = 512;
     private static final int MAX_SNAPSHOT_CANONICAL_URL_LENGTH = 1024;
     private static final int MAX_FEED_ENTRY_KEY_LENGTH = 512;
+    private static final int MAX_EXPLICIT_UPSTREAM_URLS = 10;
+    private static final int MIN_BODY_TEXT_HASH_LENGTH = 500;
     private static final Duration COLLECTION_LEASE_SAFETY_MARGIN = Duration.ofSeconds(30);
     private static final String COLLECTION_TIMEOUT_REASON = "Source collection timed out before the run lease.";
     private static final Pattern UNSAFE_XML_DECLARATION =
@@ -48,16 +53,28 @@ public class SourceCollectionService {
     private final PlatformMetricsService platformMetricsService;
     private final SourceUrlPolicy sourceUrlPolicy;
     private final PinnedSourceHttpClient sourceHttpClient;
+    private final ObjectMapper objectMapper;
 
+    @Autowired
     public SourceCollectionService(
             SourceSnapshotRepository sourceSnapshotRepository,
             PlatformMetricsService platformMetricsService,
             SourceUrlPolicy sourceUrlPolicy,
-            PinnedSourceHttpClient sourceHttpClient) {
+            PinnedSourceHttpClient sourceHttpClient,
+            ObjectMapper objectMapper) {
         this.sourceSnapshotRepository = sourceSnapshotRepository;
         this.platformMetricsService = platformMetricsService;
         this.sourceUrlPolicy = sourceUrlPolicy;
         this.sourceHttpClient = sourceHttpClient;
+        this.objectMapper = objectMapper;
+    }
+
+    SourceCollectionService(
+            SourceSnapshotRepository sourceSnapshotRepository,
+            PlatformMetricsService platformMetricsService,
+            SourceUrlPolicy sourceUrlPolicy,
+            PinnedSourceHttpClient sourceHttpClient) {
+        this(sourceSnapshotRepository, platformMetricsService, sourceUrlPolicy, sourceHttpClient, new ObjectMapper());
     }
 
     public CollectionResult collect(Long topicId, Long runId, List<AutomationSource> sources) {
@@ -66,7 +83,6 @@ public class SourceCollectionService {
 
     public CollectionResult collect(Long topicId, Long runId, List<AutomationSource> sources, LocalDateTime leaseExpiresAt) {
         var accumulator = new CollectionAccumulator(topicId, runId);
-        Set<String> allowedCanonicalUrls = new HashSet<>();
         var collectionDeadline = CollectionDeadline.fromLease(leaseExpiresAt);
         for (int index = 0; index < sources.size(); index++) {
             if (accumulator.overflowed()) {
@@ -78,7 +94,6 @@ public class SourceCollectionService {
                     accumulator,
                     source,
                     moreSourcesAfter,
-                    allowedCanonicalUrls,
                     collectionDeadline);
             if (result.overflowed() || result.timedOut()) {
                 break;
@@ -94,10 +109,9 @@ public class SourceCollectionService {
             CollectionAccumulator accumulator,
             AutomationSource source,
             boolean moreSourcesAfter,
-            Set<String> allowedCanonicalUrls,
             CollectionDeadline collectionDeadline) {
         if (source.getSourceType() == AutomationSourceType.RSS) {
-            return collectFeed(accumulator, source, moreSourcesAfter, allowedCanonicalUrls, collectionDeadline);
+            return collectFeed(accumulator, source, moreSourcesAfter, collectionDeadline);
         }
         try {
             var snapshot = buildArticleSnapshot(
@@ -109,9 +123,7 @@ public class SourceCollectionService {
                     null,
                     null,
                     collectionDeadline);
-            if (shouldKeepSnapshot(snapshot, allowedCanonicalUrls)) {
-                accumulator.addSnapshot(snapshot, source.getSourceType(), source, moreSourcesAfter);
-            }
+            accumulator.addSnapshot(snapshot, source.getSourceType(), source, moreSourcesAfter);
             return new CollectionBatch(accumulator.overflowed(), false);
         } catch (Exception exception) {
             accumulator.addSnapshot(
@@ -127,7 +139,6 @@ public class SourceCollectionService {
             CollectionAccumulator accumulator,
             AutomationSource source,
             boolean moreSourcesAfter,
-            Set<String> allowedCanonicalUrls,
             CollectionDeadline collectionDeadline) {
         try {
             var feedResponse = fetch(source.getSourceUrl(), collectionDeadline);
@@ -214,11 +225,9 @@ public class SourceCollectionService {
                             source.getSourceUrl(),
                             feedEntryKey,
                             collectionDeadline);
-                    if (shouldKeepSnapshot(snapshot, allowedCanonicalUrls)) {
-                        accumulator.addSnapshot(snapshot, source.getSourceType(), source, moreWorkAfterEntry);
-                        if (accumulator.overflowed()) {
-                            return new CollectionBatch(true, false);
-                        }
+                    accumulator.addSnapshot(snapshot, source.getSourceType(), source, moreWorkAfterEntry);
+                    if (accumulator.overflowed()) {
+                        return new CollectionBatch(true, false);
                     }
                 } catch (Exception exception) {
                     accumulator.addSnapshot(
@@ -257,11 +266,6 @@ public class SourceCollectionService {
                     moreSourcesAfter);
             return new CollectionBatch(accumulator.overflowed(), isCollectionTimeout(exception));
         }
-    }
-
-    private boolean shouldKeepSnapshot(SourceSnapshot snapshot, Set<String> allowedCanonicalUrls) {
-        return snapshot.getPolicyResult() != SourcePolicyResult.ALLOWED
-                || allowedCanonicalUrls.add(snapshot.getCanonicalUrl());
     }
 
     private SourceSnapshot collectArticle(
@@ -334,6 +338,9 @@ public class SourceCollectionService {
         if (title == null) {
             title = fallbackTitle;
         }
+        var article = document.selectFirst("article");
+        var bodyText = normalizedText(article == null ? document.text() : article.text());
+        var lineage = articleLineage(article, response.uri());
         if (sourceFeedUrl != null) {
             return SourceSnapshot.createFeedEntrySnapshot(
                     UUID.randomUUID().toString(),
@@ -341,6 +348,7 @@ public class SourceCollectionService {
                     source.getId(),
                     runId,
                     storedSourceUrl(articleUrl),
+                    storedCanonicalUrl(response.uri().toString()),
                     storedSourceUrl(sourceFeedUrl),
                     storedFeedEntryKey(sourceFeedEntryKey),
                     canonical,
@@ -351,6 +359,9 @@ public class SourceCollectionService {
                     response.firstHeader("etag"),
                     response.firstHeader("last-modified"),
                     sha256(body),
+                    bodyText.length() >= MIN_BODY_TEXT_HASH_LENGTH ? sha256(bodyText) : null,
+                    lineage.status(),
+                    upstreamJson(lineage.upstreamUrls()),
                     response.statusCode() >= 200 && response.statusCode() < 300 ? SourcePolicyResult.ALLOWED : SourcePolicyResult.HELD,
                     excerpt(document.text()));
         }
@@ -360,6 +371,7 @@ public class SourceCollectionService {
                 source.getId(),
                 runId,
                 storedSourceUrl(articleUrl),
+                storedCanonicalUrl(response.uri().toString()),
                 canonical,
                 response.uri().getHost(),
                 title,
@@ -368,6 +380,9 @@ public class SourceCollectionService {
                 response.firstHeader("etag"),
                 response.firstHeader("last-modified"),
                 sha256(body),
+                bodyText.length() >= MIN_BODY_TEXT_HASH_LENGTH ? sha256(bodyText) : null,
+                lineage.status(),
+                upstreamJson(lineage.upstreamUrls()),
                 response.statusCode() >= 200 && response.statusCode() < 300 ? SourcePolicyResult.ALLOWED : SourcePolicyResult.HELD,
                 excerpt(document.text()));
     }
@@ -616,6 +631,54 @@ public class SourceCollectionService {
         }
     }
 
+    private ArticleLineage articleLineage(Element article, URI responseUri) {
+        if (article == null) {
+            return new ArticleLineage("UNKNOWN", List.of());
+        }
+        var urls = new LinkedHashSet<String>();
+        addExplicitUpstreamUrls(urls, article, "blockquote[cite]", "cite", responseUri);
+        addExplicitUpstreamUrls(urls, article, "cite a[href]", "href", responseUri);
+        for (var link : article.select("a[rel][href]")) {
+            if (Arrays.stream(link.attr("rel").split("\\s+"))
+                    .anyMatch(token -> "cite".equalsIgnoreCase(token))) {
+                addExplicitUpstreamUrl(urls, link.attr("href"), responseUri);
+            }
+        }
+        return new ArticleLineage("EXTRACTED", List.copyOf(urls));
+    }
+
+    private void addExplicitUpstreamUrls(
+            LinkedHashSet<String> urls,
+            Element article,
+            String selector,
+            String attribute,
+            URI responseUri) {
+        for (var element : article.select(selector)) {
+            if (urls.size() >= MAX_EXPLICIT_UPSTREAM_URLS) {
+                return;
+            }
+            var raw = element.attr(attribute);
+            addExplicitUpstreamUrl(urls, raw, responseUri);
+        }
+    }
+
+    private void addExplicitUpstreamUrl(LinkedHashSet<String> urls, String raw, URI responseUri) {
+        if (urls.size() >= MAX_EXPLICIT_UPSTREAM_URLS) {
+            return;
+        }
+        if (raw == null || raw.isBlank()) {
+            return;
+        }
+        try {
+            var validated = sourceUrlPolicy.validateStoredUrl(responseUri.resolve(raw).toString()).toASCIIString();
+            if (validated.length() <= MAX_SNAPSHOT_CANONICAL_URL_LENGTH) {
+                urls.add(validated);
+            }
+        } catch (IllegalArgumentException ignored) {
+            // Invalid or disallowed attribution URLs are ignored rather than promoted as evidence.
+        }
+    }
+
     private String safeFailureReason(Exception exception) {
         if (isCollectionTimeout(exception)) {
             return COLLECTION_TIMEOUT_REASON;
@@ -735,6 +798,7 @@ public class SourceCollectionService {
                 runId,
                 storedSourceUrl(sourceUrl),
                 storedCanonicalUrl(canonicalUrl),
+                storedCanonicalUrl(canonicalUrl),
                 originHost == null || originHost.isBlank() ? "unknown" : originHost,
                 titleOrNull(title),
                 LocalDateTime.now(ZoneOffset.UTC),
@@ -742,6 +806,9 @@ public class SourceCollectionService {
                 null,
                 null,
                 sha256(reason),
+                null,
+                "UNKNOWN",
+                "[]",
                 SourcePolicyResult.HELD,
                 excerpt(reason));
     }
@@ -792,6 +859,7 @@ public class SourceCollectionService {
                 source.getId(),
                 runId,
                 storedSourceUrl(sourceUrl),
+                storedCanonicalUrl(canonicalUrl),
                 storedSourceUrl(sourceFeedUrl),
                 storedFeedEntryKey(sourceFeedEntryKey),
                 storedCanonicalUrl(canonicalUrl),
@@ -802,6 +870,9 @@ public class SourceCollectionService {
                 null,
                 null,
                 sha256(reason),
+                null,
+                "UNKNOWN",
+                "[]",
                 SourcePolicyResult.HELD,
                 excerpt(reason));
     }
@@ -831,6 +902,21 @@ public class SourceCollectionService {
         return value == null || value.length() <= MAX_SNAPSHOT_CANONICAL_URL_LENGTH
                 ? value
                 : value.substring(0, MAX_SNAPSHOT_CANONICAL_URL_LENGTH);
+    }
+
+    private String normalizedText(String value) {
+        return value == null ? "" : value.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
+    }
+
+    private String upstreamJson(List<String> urls) {
+        if (urls == null || urls.isEmpty()) {
+            return "[]";
+        }
+        try {
+            return objectMapper.writeValueAsString(urls);
+        } catch (Exception exception) {
+            throw new IllegalStateException("Could not serialize explicit upstream URLs.", exception);
+        }
     }
 
     private String storedFeedEntryKey(String value) {
@@ -952,6 +1038,9 @@ public class SourceCollectionService {
     }
 
     private record PendingSnapshot(SourceSnapshot snapshot, AutomationSourceType sourceType) {
+    }
+
+    private record ArticleLineage(String status, List<String> upstreamUrls) {
     }
 
     private record CollectionDeadline(Long deadlineNanos) {

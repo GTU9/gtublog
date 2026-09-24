@@ -29,6 +29,9 @@ public class SourceSnapshot extends BaseEntity {
     @Column(name = "source_url", nullable = false, length = 512)
     private String sourceUrl;
 
+    @Column(name = "fetched_url", length = 1024)
+    private String fetchedUrl;
+
     @Column(name = "source_feed_url", length = 512)
     private String sourceFeedUrl;
 
@@ -59,6 +62,16 @@ public class SourceSnapshot extends BaseEntity {
     @Column(name = "content_hash", nullable = false, length = 64)
     private String contentHash;
 
+    @Column(name = "body_text_hash", length = 64)
+    private String bodyTextHash;
+
+    @Column(name = "lineage_extraction_status", nullable = false, length = 32)
+    private String lineageExtractionStatus = "UNKNOWN";
+
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(name = "explicit_upstream_urls_json", columnDefinition = "longtext")
+    private String explicitUpstreamUrlsJson;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "policy_result", nullable = false, length = 32)
     private SourcePolicyResult policyResult;
@@ -76,6 +89,7 @@ public class SourceSnapshot extends BaseEntity {
             Long automationSourceId,
             Long automationRunId,
             String sourceUrl,
+            String fetchedUrl,
             String sourceFeedUrl,
             String sourceFeedEntryKey,
             String canonicalUrl,
@@ -86,6 +100,9 @@ public class SourceSnapshot extends BaseEntity {
             String etag,
             String lastModifiedHeader,
             String contentHash,
+            String bodyTextHash,
+            String lineageExtractionStatus,
+            String explicitUpstreamUrlsJson,
             SourcePolicyResult policyResult,
             String bodyExcerpt) {
         this.snapshotKey = snapshotKey;
@@ -93,6 +110,7 @@ public class SourceSnapshot extends BaseEntity {
         this.automationSourceId = automationSourceId;
         this.automationRunId = automationRunId;
         this.sourceUrl = sourceUrl;
+        this.fetchedUrl = fetchedUrl;
         this.sourceFeedUrl = sourceFeedUrl;
         this.sourceFeedEntryKey = sourceFeedEntryKey;
         this.canonicalUrl = canonicalUrl;
@@ -103,6 +121,9 @@ public class SourceSnapshot extends BaseEntity {
         this.etag = etag;
         this.lastModifiedHeader = lastModifiedHeader;
         this.contentHash = contentHash;
+        this.bodyTextHash = bodyTextHash;
+        this.lineageExtractionStatus = lineageExtractionStatus == null ? "UNKNOWN" : lineageExtractionStatus;
+        this.explicitUpstreamUrlsJson = explicitUpstreamUrlsJson;
         this.policyResult = policyResult;
         this.bodyExcerpt = bodyExcerpt;
     }
@@ -113,6 +134,7 @@ public class SourceSnapshot extends BaseEntity {
             Long automationSourceId,
             Long automationRunId,
             String sourceUrl,
+            String fetchedUrl,
             String canonicalUrl,
             String originHost,
             String title,
@@ -121,6 +143,9 @@ public class SourceSnapshot extends BaseEntity {
             String etag,
             String lastModifiedHeader,
             String contentHash,
+            String bodyTextHash,
+            String lineageExtractionStatus,
+            String explicitUpstreamUrlsJson,
             SourcePolicyResult policyResult,
             String bodyExcerpt) {
         return new SourceSnapshot(
@@ -129,6 +154,7 @@ public class SourceSnapshot extends BaseEntity {
                 automationSourceId,
                 automationRunId,
                 sourceUrl,
+                fetchedUrl,
                 null,
                 null,
                 canonicalUrl,
@@ -139,6 +165,9 @@ public class SourceSnapshot extends BaseEntity {
                 etag,
                 lastModifiedHeader,
                 contentHash,
+                bodyTextHash,
+                lineageExtractionStatus,
+                explicitUpstreamUrlsJson,
                 policyResult,
                 bodyExcerpt);
     }
@@ -149,6 +178,7 @@ public class SourceSnapshot extends BaseEntity {
             Long automationSourceId,
             Long automationRunId,
             String sourceUrl,
+            String fetchedUrl,
             String sourceFeedUrl,
             String sourceFeedEntryKey,
             String canonicalUrl,
@@ -159,6 +189,9 @@ public class SourceSnapshot extends BaseEntity {
             String etag,
             String lastModifiedHeader,
             String contentHash,
+            String bodyTextHash,
+            String lineageExtractionStatus,
+            String explicitUpstreamUrlsJson,
             SourcePolicyResult policyResult,
             String bodyExcerpt) {
         return new SourceSnapshot(
@@ -167,6 +200,7 @@ public class SourceSnapshot extends BaseEntity {
                 automationSourceId,
                 automationRunId,
                 sourceUrl,
+                fetchedUrl,
                 sourceFeedUrl,
                 sourceFeedEntryKey,
                 canonicalUrl,
@@ -177,6 +211,9 @@ public class SourceSnapshot extends BaseEntity {
                 etag,
                 lastModifiedHeader,
                 contentHash,
+                bodyTextHash,
+                lineageExtractionStatus,
+                explicitUpstreamUrlsJson,
                 policyResult,
                 bodyExcerpt);
     }
@@ -189,8 +226,16 @@ public class SourceSnapshot extends BaseEntity {
         return automationRunId;
     }
 
+    public Long getAutomationSourceId() {
+        return automationSourceId;
+    }
+
     public String getSourceUrl() {
         return sourceUrl;
+    }
+
+    public String getFetchedUrl() {
+        return fetchedUrl;
     }
 
     public String getSourceFeedUrl() {
@@ -223,6 +268,18 @@ public class SourceSnapshot extends BaseEntity {
 
     public String getContentHash() {
         return contentHash;
+    }
+
+    public String getBodyTextHash() {
+        return bodyTextHash;
+    }
+
+    public String getLineageExtractionStatus() {
+        return lineageExtractionStatus;
+    }
+
+    public String getExplicitUpstreamUrlsJson() {
+        return explicitUpstreamUrlsJson;
     }
 
     public SourcePolicyResult getPolicyResult() {

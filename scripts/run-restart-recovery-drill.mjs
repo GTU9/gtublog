@@ -420,15 +420,23 @@ async function createPublishedAutomationRun(token) {
   }
 
   const detail = await api(`/api/v1/admin/automation/runs/${run.id}`, { token });
-  if (detail.run.status !== "SUCCEEDED") {
-    throw new Error(`Expected publish drill run to succeed but got ${detail.run.status}.`);
+  if (detail.run.status !== "HELD" || !detail.availableActions.canOverridePublish) {
+    throw new Error(`Expected unverified v3 draft to be held but got ${detail.run.status}: ${detail.run.holdReason}.`);
+  }
+
+  const override = await api(`/api/v1/admin/automation/runs/${run.id}/override-publish`, {
+    method: "POST",
+    token,
+  });
+  if (!override.postId || !override.slug) {
+    throw new Error("Expected an audited administrator override to publish the held drill draft.");
   }
 
   const publishedSlug = executeSql(
     `SELECT slug FROM post WHERE title = '${expectedTitle.replace(/'/g, "''")}' ORDER BY id DESC LIMIT 1`,
   );
   if (!publishedSlug) {
-    throw new Error("Expected an automatically published post slug but none was stored.");
+    throw new Error("Expected a manually published held draft slug but none was stored.");
   }
 
   return await api(`/api/v1/public/posts/${publishedSlug}`);

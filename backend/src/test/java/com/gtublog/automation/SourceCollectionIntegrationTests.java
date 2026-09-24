@@ -566,7 +566,7 @@ class SourceCollectionIntegrationTests {
     }
 
     @Test
-    void deduplicatesRssArticlesByCanonicalUrl() {
+    void preservesRssArticlesThatShareCanonicalUrl() {
         stubRssFeed("/duplicates.xml", """
                 <rss version="2.0">
                   <channel>
@@ -585,11 +585,14 @@ class SourceCollectionIntegrationTests {
         assertThat(run.status()).isEqualTo(AutomationRunStatus.RUNNING);
         assertThat(snapshotRows(run.id()))
                 .extracting(row -> row.get("canonical_url"))
-                .containsExactly("https://news.example.com/canonical-duplicate", "https://news.example.com/unique");
+                .containsExactly(
+                        "https://news.example.com/canonical-duplicate",
+                        "https://news.example.com/canonical-duplicate",
+                        "https://news.example.com/unique");
     }
 
     @Test
-    void deduplicatesRssArticlesByCanonicalUrlAcrossFeedsInTheSameRun() {
+    void preservesRssArticlesThatShareCanonicalUrlAcrossFeedsInTheSameRun() {
         stubRssFeed("/cross-feed-a.xml", """
                 <rss version="2.0">
                   <channel>
@@ -640,7 +643,9 @@ class SourceCollectionIntegrationTests {
         assertThat(snapshotRows(run.id()))
                 .filteredOn(row -> "ALLOWED".equals(row.get("policy_result")))
                 .extracting(row -> row.get("canonical_url"))
-                .containsExactly("https://news.example.com/shared-canonical");
+                .containsExactly(
+                        "https://news.example.com/shared-canonical",
+                        "https://news.example.com/shared-canonical");
         assertThat(jdbcTemplate.queryForObject(
                 """
                 SELECT COUNT(DISTINCT origin_host)
@@ -655,7 +660,7 @@ class SourceCollectionIntegrationTests {
     }
 
     @Test
-    void continuesCollectingWhenASecondFeedOnlyContainsDuplicateArticles() {
+    void preservesDuplicateOnlyFeedEvidenceAndContinuesCollecting() {
         stubRssFeed("/duplicate-source-a.xml", """
                 <rss version="2.0">
                   <channel>
@@ -704,7 +709,10 @@ class SourceCollectionIntegrationTests {
         assertThat(run.status()).isEqualTo(AutomationRunStatus.RUNNING);
         assertThat(snapshotRows(run.id()))
                 .extracting(row -> row.get("canonical_url"))
-                .containsExactly("https://news.example.com/shared", "https://independent.example.com/story");
+                .containsExactly(
+                        "https://news.example.com/shared",
+                        "https://news.example.com/shared",
+                        "https://independent.example.com/story");
         assertThat(snapshotRows(run.id()))
                 .extracting(row -> row.get("policy_result"))
                 .containsOnly("ALLOWED");
@@ -786,7 +794,7 @@ class SourceCollectionIntegrationTests {
     }
 
     @Test
-    void doesNotOverflowWhenNinetyNineSnapshotsAreFollowedByDuplicateOnlyFeedAndOneNewSource() {
+    void overflowsWhenNinetyNineSnapshotsAreFollowedByPreservedDuplicateOnlyFeedAndOneNewSource() {
         var topic = automationAdminService.createTopic(new AutomationTopicRequest(
                 null,
                 "Source Collection Duplicate Boundary",
@@ -843,17 +851,21 @@ class SourceCollectionIntegrationTests {
                         snapshotRows(run.id()).stream()
                                 .filter(row -> "HELD".equals(row.get("policy_result")))
                                 .toList())
-                .isEqualTo(AutomationRunStatus.RUNNING);
+                .isEqualTo(AutomationRunStatus.HELD);
         assertThat(snapshotRows(run.id())).hasSize(100);
         assertThat(snapshotRows(run.id()))
                 .extracting(row -> row.get("policy_result"))
-                .containsOnly("ALLOWED");
+                .contains("HELD");
         assertThat(snapshotRows(run.id()))
                 .extracting(row -> row.get("canonical_url"))
-                .contains("https://boundary.example.com/hundredth");
+                .doesNotContain("https://boundary.example.com/hundredth");
         assertThat(snapshotRows(run.id()))
                 .extracting(row -> row.get("body_excerpt"))
-                .noneSatisfy(excerpt -> assertThat((String) excerpt).contains("exceeded the maximum"));
+                .anySatisfy(excerpt -> assertThat((String) excerpt).contains("exceeded the maximum"));
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM generation_job WHERE run_id = ?",
+                Integer.class,
+                run.id())).isZero();
     }
 
     @Test

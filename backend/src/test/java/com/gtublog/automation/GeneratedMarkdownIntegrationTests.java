@@ -144,7 +144,7 @@ class GeneratedMarkdownIntegrationTests {
     }
 
     @Test
-    void v3AutomaticPublicationStoresAndServesSafeStructuredMarkdown() throws Exception {
+    void v3HeldDraftOverrideStoresAndServesSafeStructuredMarkdown() throws Exception {
         publishAndAssert(false);
     }
 
@@ -311,15 +311,10 @@ class GeneratedMarkdownIntegrationTests {
                         .content(objectMapper.writeValueAsString(body)))
                 .andExpect(status().isAccepted());
 
-        if (heldOverride) {
-            assertThat(jdbcTemplate.queryForObject("SELECT status FROM automation_run WHERE id = ?", String.class, runId))
-                    .isEqualTo("HELD");
-            assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isZero();
-            assertThat(automationAdminService.overridePublishHeldRun(runId).postId()).isPositive();
-        } else {
-            assertThat(jdbcTemplate.queryForObject("SELECT status FROM automation_run WHERE id = ?", String.class, runId))
-                    .isEqualTo("SUCCEEDED");
-        }
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM automation_run WHERE id = ?", String.class, runId))
+                .isEqualTo("HELD");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isZero();
+        assertThat(automationAdminService.overridePublishHeldRun(runId).postId()).isPositive();
 
         var post = jdbcTemplate.queryForMap("SELECT id, slug, content_markdown, content_html FROM post");
         long postId = ((Number) post.get("id")).longValue();

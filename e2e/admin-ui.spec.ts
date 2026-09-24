@@ -103,4 +103,7 @@ test("administrator can manage automation configuration and see safe conflict gu
   await page.getByRole("button", { name: "상세보기" }).first().click();
   await expect(page.getByRole("heading", { name: "선택한 실행 상세" })).toBeVisible();
   await expect(page.getByText("운영 진단 요약")).toBeVisible();
+
+  await page.getByRole("row").filter({ hasText: "run-302" }).getByRole("button", { name: "상세보기" }).click();
+  await expect(page.getByText("핵심 주장별 근거가 검증되지 않아 자동 발행을 보류했습니다.")).toBeVisible();
 });
