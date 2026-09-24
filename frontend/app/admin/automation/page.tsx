@@ -23,6 +23,7 @@ import {
 } from "@/src/admin-api";
 import { useAdminAuth } from "@/src/admin-auth";
 import { AutomationControlCenter } from "@/src/automation-admin-ui";
+import { AutomationOriginPanel } from "@/src/automation-origin-ui";
 import { AdminPageHeader, LoadingCard, MessageCard } from "@/src/admin-ui";
 import type {
   AutomationDiagnosticsResponse,
@@ -439,7 +440,7 @@ export default function AdminAutomationPage() {
       {message ? <MessageCard title="자동화 작업 완료" description={message} tone="success" /> : null}
       {loading ? (
         <LoadingCard message="자동화 운영 화면을 불러오는 중입니다..." />
-      ) : (
+      ) : (<>
         <AutomationControlCenter
           diagnostics={diagnostics}
           topics={topics}
@@ -474,7 +475,13 @@ export default function AdminAutomationPage() {
           onOverridePublish={handleOverridePublish}
           onProcessOutbox={handleProcessOutbox}
         />
-      )}
+        <AutomationOriginPanel
+          authenticatedFetch={auth.authenticatedFetch}
+          topicId={effectiveTopicId}
+          sources={sources}
+          runDetail={runDetail}
+        />
+      </>)}
     </section>
   );
 }

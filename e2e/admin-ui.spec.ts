@@ -107,3 +107,49 @@ test("administrator can manage automation configuration and see safe conflict gu
   await page.getByRole("row").filter({ hasText: "run-302" }).getByRole("button", { name: "상세보기" }).click();
   await expect(page.getByText("핵심 주장별 근거가 검증되지 않아 자동 발행을 보류했습니다.")).toBeVisible();
 });
+
+test("administrator reviews observed article hosts and records, conflicts, then revokes an approval", async ({ page }) => {
+  await page.route(`${applicationApiBaseUrl}/**`, (route) => route.abort("connectionrefused"));
+  await page.goto("/admin/automation");
+
+  const panel = page.getByLabel("기사 출처 승인");
+  await expect(panel.getByRole("heading", { name: "기사 출처 그룹과 호스트 승인" })).toBeVisible();
+  await expect(panel.getByText("이 기록만으로 자동 발행이 허용되지는 않습니다.", { exact: false })).toBeVisible();
+  await expect(panel.locator("#observed-article-hosts option[value='articles.example.org']")).toHaveCount(1);
+  await expect(panel.getByText("선택한 실행에서 이 소스에 연결된 관찰 호스트: articles.example.org")).toBeVisible();
+
+  await panel.getByRole("textbox", { name: "그룹 이름" }).fill("Independent desk");
+  await panel.getByRole("textbox", { name: "그룹 근거" }).fill("Editorial ownership reviewed");
+  await panel.getByRole("button", { name: "그룹 기록" }).click();
+  await expect(panel.getByText("Editorial ownership reviewed")).toBeVisible();
+
+  await panel.getByRole("combobox", { name: "설정된 소스" }).selectOption("101");
+  await panel.getByLabel("실제 응답에서 관찰한 기사 호스트").fill("articles.example.org");
+  await panel.getByRole("combobox", { name: "출처 그룹" }).selectOption({ label: "Independent desk" });
+  await panel.getByRole("textbox", { name: "승인 근거" }).fill("Original article ownership checked");
+  await panel.getByRole("button", { name: "호스트 승인 기록" }).click();
+  const history = panel.getByLabel("소스 101 승인 이력");
+  await expect(history.getByText("Original article ownership checked", { exact: false })).toBeVisible();
+  await expect(history.getByText(/articles\.example\.org.*활성.*Independent desk.*revision 1/)).toBeVisible();
+
+  const approvalRoute = `${applicationApiBaseUrl}/admin/automation/sources/101/origin-approvals`;
+  await page.route(approvalRoute, (route) => route.fulfill({
+    status: 409,
+    contentType: "application/problem+json",
+    body: JSON.stringify({ detail: "이미 활성 승인된 기사 호스트입니다." }),
+  }));
+  await panel.getByLabel("실제 응답에서 관찰한 기사 호스트").fill("articles.example.org");
+  await panel.getByRole("combobox", { name: "출처 그룹" }).selectOption({ label: "Independent desk" });
+  await panel.getByRole("textbox", { name: "승인 근거" }).fill("Duplicate attempt");
+  await panel.getByRole("button", { name: "호스트 승인 기록" }).click();
+  await expect(panel.getByRole("alert")).toContainText("충돌:");
+  await expect(panel.getByRole("alert")).toContainText("최신 승인 이력을 확인한 뒤 다시 시도하세요.");
+  await page.unroute(approvalRoute);
+
+  await history.getByRole("button", { name: "승인 취소", exact: true }).click();
+  await history.getByRole("textbox", { name: "취소 근거" }).fill("Ownership changed");
+  await history.getByRole("button", { name: "승인 취소 확정" }).click();
+  await expect(history.getByText(/articles\.example\.org.*취소됨.*Independent desk.*revision 2/)).toBeVisible();
+  await expect(history.getByText("승인 근거: Original article ownership checked")).toBeVisible();
+  await expect(history.getByText("취소 근거: Ownership changed")).toBeVisible();
+});

@@ -94,6 +94,31 @@ export type AutomationSourceUpsertRequest = {
   enabled: boolean;
 };
 
+export type AutomationOriginGroupResponse = {
+  id: number;
+  topicId: number;
+  name: string;
+  rationale: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AutomationOriginApprovalResponse = {
+  id: number;
+  sourceId: number;
+  originHost: string;
+  groupId: number;
+  groupName: string;
+  rationale: string;
+  revocationRationale: string | null;
+  active: boolean;
+  revision: number;
+  approvedAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AutomationScheduleResponse = {
   id: number;
   topicId: number;
@@ -166,7 +191,9 @@ export type AutomationRunDetailResponse = {
   };
   snapshots: {
     id: number;
+    automationSourceId: number | null;
     sourceUrl: string;
+    sourceFeedUrl?: string | null;
     fetchedUrl?: string | null;
     canonicalUrl: string;
     originHost: string;

@@ -11,6 +11,10 @@ import {
   mockAutomationRunOverridePublish,
   mockAutomationRunRetry,
   mockAutomationSources,
+  mockAutomationOriginApprovals,
+  mockCreateAutomationOriginApproval,
+  mockCreateAutomationOriginGroup,
+  mockRevokeAutomationOriginApproval,
   mockAutomationTopics,
   mockTriggerAutomationRun,
   mockDeleteAutomationSchedule,
@@ -38,6 +42,27 @@ describe("admin mock state", () => {
     expect(preview).toContain("&lt;script&gt;");
     expect(preview).not.toContain("<img");
     expect(preview).not.toContain("<script");
+  });
+
+  it("records exact source and article host approval with revision checked revocation", () => {
+    const group = mockCreateAutomationOriginGroup(1, { name: "Original reporting", rationale: "Separate editorial desk" });
+    const approval = mockCreateAutomationOriginApproval(101, {
+      originHost: "article.example.org", groupId: group.id, rationale: "Byline and editorial ownership reviewed",
+    });
+
+    expect(approval.sourceId).toBe(101);
+    expect(approval.originHost).toBe("article.example.org");
+    expect(mockAutomationOriginApprovals(102)).toHaveLength(0);
+    expect(() => mockCreateAutomationOriginApproval(101, {
+      originHost: "article.example.org", groupId: group.id, rationale: "Duplicate",
+    })).toThrow();
+
+    const revoked = mockRevokeAutomationOriginApproval(approval.id, { revision: approval.revision, rationale: "Ownership changed" });
+    expect(revoked.active).toBe(false);
+    expect(revoked.revision).toBe(2);
+    expect(revoked.rationale).toBe("Byline and editorial ownership reviewed");
+    expect(revoked.revocationRationale).toBe("Ownership changed");
+    expect(() => mockRevokeAutomationOriginApproval(approval.id, { revision: 1, rationale: "Stale" })).toThrow();
   });
 
   it("creates drafts and tracks them in the admin listing", () => {

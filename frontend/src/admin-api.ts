@@ -8,6 +8,8 @@ import type {
   AuditPage,
   AutomationDiagnosticsResponse,
   AutomationOutboxResponse,
+  AutomationOriginApprovalResponse,
+  AutomationOriginGroupResponse,
   AutomationRunDetailResponse,
   AutomationRunResponse,
   AutomationScheduleResponse,
@@ -30,6 +32,11 @@ import {
   mockDeleteCategory,
   mockDeleteTag,
   mockAutomationOutbox,
+  mockAutomationOriginApprovals,
+  mockAutomationOriginGroups,
+  mockCreateAutomationOriginApproval,
+  mockCreateAutomationOriginGroup,
+  mockRevokeAutomationOriginApproval,
   mockAutomationDiagnostics,
   mockAutomationRunDetail,
   mockAutomationRuns,
@@ -54,6 +61,101 @@ import {
   mockUpdatePost,
 } from "@/src/admin-mock";
 import { applicationApiBaseUrl, isDevelopmentRuntime } from "@/src/site";
+
+type AuthenticatedFetch = (input: string, init?: RequestInit) => Promise<Response>;
+
+export class AutomationOriginConflictError extends Error {}
+class AutomationOriginHttpError extends Error {}
+
+async function originResponse<T>(response: Response, fallback: string): Promise<T> {
+  if (response.status === 409) {
+    const error = await toApiError(response, fallback);
+    throw new AutomationOriginConflictError(error.message);
+  }
+  if (!response.ok) {
+    const error = await toApiError(response, fallback);
+    throw new AutomationOriginHttpError(error.message);
+  }
+  return parseOrThrow<T>(response, fallback);
+}
+
+export async function fetchAutomationOriginGroups(authenticatedFetch: AuthenticatedFetch, topicId: number) {
+  try {
+    return await originResponse<AutomationOriginGroupResponse[]>(
+      await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/topics/${topicId}/origin-groups`),
+      "출처 그룹을 불러오지 못했습니다.",
+    );
+  } catch (error) {
+    if (error instanceof AutomationOriginConflictError || error instanceof AutomationOriginHttpError || !isDevelopmentRuntime()) throw error;
+    return mockAutomationOriginGroups(topicId);
+  }
+}
+
+export async function createAutomationOriginGroup(
+  authenticatedFetch: AuthenticatedFetch,
+  topicId: number,
+  request: { name: string; rationale: string },
+) {
+  try {
+    return await originResponse<AutomationOriginGroupResponse>(
+      await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/topics/${topicId}/origin-groups`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request),
+      }),
+      "출처 그룹을 만들지 못했습니다.",
+    );
+  } catch (error) {
+    if (error instanceof AutomationOriginConflictError || error instanceof AutomationOriginHttpError || !isDevelopmentRuntime()) throw error;
+    return mockCreateAutomationOriginGroup(topicId, request);
+  }
+}
+
+export async function fetchAutomationOriginApprovals(authenticatedFetch: AuthenticatedFetch, sourceId: number) {
+  try {
+    return await originResponse<AutomationOriginApprovalResponse[]>(
+      await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/sources/${sourceId}/origin-approvals`),
+      "기사 호스트 승인 이력을 불러오지 못했습니다.",
+    );
+  } catch (error) {
+    if (error instanceof AutomationOriginConflictError || error instanceof AutomationOriginHttpError || !isDevelopmentRuntime()) throw error;
+    return mockAutomationOriginApprovals(sourceId);
+  }
+}
+
+export async function createAutomationOriginApproval(
+  authenticatedFetch: AuthenticatedFetch,
+  sourceId: number,
+  request: { originHost: string; groupId: number; rationale: string },
+) {
+  try {
+    return await originResponse<AutomationOriginApprovalResponse>(
+      await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/sources/${sourceId}/origin-approvals`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request),
+      }),
+      "기사 호스트를 승인하지 못했습니다.",
+    );
+  } catch (error) {
+    if (error instanceof AutomationOriginConflictError || error instanceof AutomationOriginHttpError || !isDevelopmentRuntime()) throw error;
+    return mockCreateAutomationOriginApproval(sourceId, request);
+  }
+}
+
+export async function revokeAutomationOriginApproval(
+  authenticatedFetch: AuthenticatedFetch,
+  approvalId: number,
+  request: { revision: number; rationale: string },
+) {
+  try {
+    return await originResponse<AutomationOriginApprovalResponse>(
+      await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/origin-approvals/${approvalId}/revoke`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request),
+      }),
+      "기사 호스트 승인을 취소하지 못했습니다.",
+    );
+  } catch (error) {
+    if (error instanceof AutomationOriginConflictError || error instanceof AutomationOriginHttpError || !isDevelopmentRuntime()) throw error;
+    return mockRevokeAutomationOriginApproval(approvalId, request);
+  }
+}
 
 async function toApiError(response: Response, fallbackMessage: string) {
   try {

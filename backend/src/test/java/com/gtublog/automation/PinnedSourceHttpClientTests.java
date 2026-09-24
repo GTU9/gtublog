@@ -2,6 +2,7 @@ package com.gtublog.automation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.get;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
@@ -66,7 +67,8 @@ class PinnedSourceHttpClientTests {
             var resolver = (SourceUrlPolicy.AddressResolver) host -> new InetAddress[] {IPV4_LOOPBACK};
             var policy = new SourceUrlPolicy(Set.of("first.invalid", "second.invalid"), resolver);
             var client = new PinnedSourceHttpClient(Duration.ofMillis(100), Duration.ofMillis(180));
-            var service = new SourceCollectionService(null, null, policy, client, new ObjectMapper());
+            var service = new SourceCollectionService(
+                    null, policy, client, new ObjectMapper(), mock(SourceSnapshotEvidenceService.class));
 
             assertThatThrownBy(() -> service.fetch("http://first.invalid:" + firstServer.getLocalPort() + "/start"))
                     .isInstanceOf(java.io.IOException.class)
