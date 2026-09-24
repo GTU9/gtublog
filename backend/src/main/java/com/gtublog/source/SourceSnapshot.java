@@ -65,6 +65,16 @@ public class SourceSnapshot extends BaseEntity {
     @Column(name = "body_text_hash", length = 64)
     private String bodyTextHash;
 
+    @JdbcTypeCode(SqlTypes.LONGVARCHAR)
+    @Column(name = "article_evidence_text", columnDefinition = "longtext")
+    private String articleEvidenceText;
+
+    @Column(name = "article_evidence_hash", length = 64)
+    private String articleEvidenceHash;
+
+    @Column(name = "article_evidence_truncated", nullable = false)
+    private boolean articleEvidenceTruncated;
+
     @Column(name = "lineage_extraction_status", nullable = false, length = 32)
     private String lineageExtractionStatus = "UNKNOWN";
 
@@ -104,7 +114,10 @@ public class SourceSnapshot extends BaseEntity {
             String lineageExtractionStatus,
             String explicitUpstreamUrlsJson,
             SourcePolicyResult policyResult,
-            String bodyExcerpt) {
+            String bodyExcerpt,
+            String articleEvidenceText,
+            String articleEvidenceHash,
+            boolean articleEvidenceTruncated) {
         this.snapshotKey = snapshotKey;
         this.topicId = topicId;
         this.automationSourceId = automationSourceId;
@@ -126,6 +139,9 @@ public class SourceSnapshot extends BaseEntity {
         this.explicitUpstreamUrlsJson = explicitUpstreamUrlsJson;
         this.policyResult = policyResult;
         this.bodyExcerpt = bodyExcerpt;
+        this.articleEvidenceText = articleEvidenceText;
+        this.articleEvidenceHash = articleEvidenceHash;
+        this.articleEvidenceTruncated = articleEvidenceTruncated;
     }
 
     public static SourceSnapshot create(
@@ -147,7 +163,10 @@ public class SourceSnapshot extends BaseEntity {
             String lineageExtractionStatus,
             String explicitUpstreamUrlsJson,
             SourcePolicyResult policyResult,
-            String bodyExcerpt) {
+            String bodyExcerpt,
+            String articleEvidenceText,
+            String articleEvidenceHash,
+            boolean articleEvidenceTruncated) {
         return new SourceSnapshot(
                 snapshotKey,
                 topicId,
@@ -169,7 +188,10 @@ public class SourceSnapshot extends BaseEntity {
                 lineageExtractionStatus,
                 explicitUpstreamUrlsJson,
                 policyResult,
-                bodyExcerpt);
+                bodyExcerpt,
+                articleEvidenceText,
+                articleEvidenceHash,
+                articleEvidenceTruncated);
     }
 
     public static SourceSnapshot createFeedEntrySnapshot(
@@ -193,7 +215,10 @@ public class SourceSnapshot extends BaseEntity {
             String lineageExtractionStatus,
             String explicitUpstreamUrlsJson,
             SourcePolicyResult policyResult,
-            String bodyExcerpt) {
+            String bodyExcerpt,
+            String articleEvidenceText,
+            String articleEvidenceHash,
+            boolean articleEvidenceTruncated) {
         return new SourceSnapshot(
                 snapshotKey,
                 topicId,
@@ -215,7 +240,10 @@ public class SourceSnapshot extends BaseEntity {
                 lineageExtractionStatus,
                 explicitUpstreamUrlsJson,
                 policyResult,
-                bodyExcerpt);
+                bodyExcerpt,
+                articleEvidenceText,
+                articleEvidenceHash,
+                articleEvidenceTruncated);
     }
 
     public Long getId() {
@@ -272,6 +300,18 @@ public class SourceSnapshot extends BaseEntity {
 
     public String getBodyTextHash() {
         return bodyTextHash;
+    }
+
+    public String getArticleEvidenceText() {
+        return articleEvidenceText;
+    }
+
+    public String getArticleEvidenceHash() {
+        return articleEvidenceHash;
+    }
+
+    public boolean getArticleEvidenceTruncated() {
+        return articleEvidenceTruncated;
     }
 
     public String getLineageExtractionStatus() {

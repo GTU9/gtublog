@@ -9,8 +9,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.Options;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
-import java.time.Duration;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Duration;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import org.flywaydb.core.Flyway;
@@ -154,6 +156,102 @@ class SourceCollectionIntegrationTests {
         assertThat(snapshotRows(run.id()))
                 .extracting(row -> row.get("body_excerpt"))
                 .allSatisfy(excerpt -> assertThat((String) excerpt).contains("proves article fetch"));
+    }
+
+    @Test
+    void retainsNormalizedArticleEvidenceBeyondExcerptAndHashesTheStoredText() throws Exception {
+        stubRssFeed("/evidence.xml", """
+                <rss version="2.0"><channel><item>
+                  <title>Evidence entry</title><link>%s/evidence-article</link>
+                </item></channel></rss>
+                """.formatted(WIREMOCK.baseUrl()));
+        var articleText = "Opening " + "x".repeat(1100) + "  Mixed   Case  Café ending";
+        stubArticle("/evidence-article", "https://news.example.com/evidence", "Evidence article", articleText);
+
+        var run = triggerFeedRun("/evidence.xml", "article-evidence");
+
+        assertThat(run.status()).isEqualTo(AutomationRunStatus.RUNNING);
+        assertThat(snapshotRows(run.id())).singleElement().satisfies(row -> {
+            var evidence = (String) row.get("article_evidence_text");
+            assertThat(evidence).isEqualTo("Opening " + "x".repeat(1100) + " Mixed Case Café ending");
+            assertThat(evidence).contains("Café ending");
+            assertThat((String) row.get("body_excerpt")).hasSize(1000).doesNotContain("Café ending");
+            assertThat(row.get("article_evidence_hash")).isEqualTo(sha256(evidence));
+            assertThat(row.get("article_evidence_truncated")).isEqualTo(false);
+        });
+
+        // A later change at the origin cannot rewrite evidence already committed by Spring.
+        stubArticle("/evidence-article", "https://news.example.com/evidence", "Evidence article", "Changed later");
+        assertThat(snapshotRows(run.id())).singleElement().satisfies(row ->
+                assertThat(row.get("article_evidence_text")).isEqualTo("Opening " + "x".repeat(1100) + " Mixed Case Café ending"));
+    }
+
+    @Test
+    void truncatesArticleEvidenceWithoutSplittingUtf16SurrogatePair() throws Exception {
+        stubRssFeed("/long-evidence.xml", """
+                <rss version="2.0"><channel><item>
+                  <title>Long evidence entry</title><link>%s/long-evidence-article</link>
+                </item></channel></rss>
+                """.formatted(WIREMOCK.baseUrl()));
+        stubArticle(
+                "/long-evidence-article",
+                "https://news.example.com/long-evidence",
+                "Long evidence article",
+                "A".repeat(15_999) + "😀" + "Beyond retained prefix");
+
+        var run = triggerFeedRun("/long-evidence.xml", "long-evidence");
+
+        assertThat(run.status()).isEqualTo(AutomationRunStatus.RUNNING);
+        assertThat(snapshotRows(run.id())).singleElement().satisfies(row -> {
+            var evidence = (String) row.get("article_evidence_text");
+            assertThat(evidence).isEqualTo("A".repeat(15_999));
+            assertThat(row.get("article_evidence_hash")).isEqualTo(sha256(evidence));
+            assertThat(row.get("article_evidence_truncated")).isEqualTo(true);
+        });
+    }
+
+    @Test
+    void pageWithoutArticleHasNoVerifiableEvidence() {
+        stubRssFeed("/no-article.xml", """
+                <rss version="2.0"><channel><item>
+                  <title>Page without article</title><link>%s/no-article-page</link>
+                </item></channel></rss>
+                """.formatted(WIREMOCK.baseUrl()));
+        WIREMOCK.stubFor(get(urlEqualTo("/no-article-page"))
+                .willReturn(aResponse()
+                        .withStatus(200)
+                        .withHeader("Content-Type", "text/html; charset=utf-8")
+                        .withBody("<html><body><main>Enough body text to qualify as a fetched page.</main></body></html>")));
+
+        var run = triggerFeedRun("/no-article.xml", "no-article-evidence");
+
+        assertThat(snapshotRows(run.id())).singleElement().satisfies(row -> {
+            assertThat(row.get("article_evidence_text")).isNull();
+            assertThat(row.get("article_evidence_hash")).isNull();
+            assertThat(row.get("article_evidence_truncated")).isEqualTo(false);
+        });
+    }
+
+    @Test
+    void partialArticleResponseHasNoVerifiableEvidence() {
+        stubRssFeed("/partial-article.xml", """
+                <rss version="2.0"><channel><item>
+                  <title>Partial article</title><link>%s/partial-article-page</link>
+                </item></channel></rss>
+                """.formatted(WIREMOCK.baseUrl()));
+        WIREMOCK.stubFor(get(urlEqualTo("/partial-article-page"))
+                .willReturn(aResponse()
+                        .withStatus(206)
+                        .withHeader("Content-Type", "text/html; charset=utf-8")
+                        .withBody("<html><body><article>Only a fragment of the article.</article></body></html>")));
+
+        var run = triggerFeedRun("/partial-article.xml", "partial-article-evidence");
+
+        assertThat(snapshotRows(run.id())).singleElement().satisfies(row -> {
+            assertThat(row.get("article_evidence_text")).isNull();
+            assertThat(row.get("article_evidence_hash")).isNull();
+            assertThat(row.get("article_evidence_truncated")).isEqualTo(false);
+        });
     }
 
     @Test
@@ -423,6 +521,9 @@ class SourceCollectionIntegrationTests {
             assertThat(row.get("source_url")).isEqualTo(WIREMOCK.baseUrl() + "/broken-article");
             assertThat(row.get("http_status")).isEqualTo(503);
             assertThat(row.get("policy_result")).isEqualTo("HELD");
+            assertThat(row.get("article_evidence_text")).isNull();
+            assertThat(row.get("article_evidence_hash")).isNull();
+            assertThat(row.get("article_evidence_truncated")).isEqualTo(false);
         });
     }
 
@@ -1100,11 +1201,23 @@ class SourceCollectionIntegrationTests {
                     title,
                     http_status,
                     policy_result,
-                    body_excerpt
+                    body_excerpt,
+                    article_evidence_text,
+                    article_evidence_hash,
+                    article_evidence_truncated
                 FROM source_snapshot
                 WHERE automation_run_id = ?
                 ORDER BY id ASC
                 """,
                 runId);
+    }
+
+    private String sha256(String text) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(text.getBytes(StandardCharsets.UTF_8)));
+        } catch (Exception exception) {
+            throw new IllegalStateException(exception);
+        }
     }
 }
