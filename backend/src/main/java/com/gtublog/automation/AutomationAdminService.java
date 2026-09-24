@@ -41,6 +41,8 @@ public class AutomationAdminService {
     private final AutomationRunRecoveryService automationRunRecoveryService;
     private final AutomationRunRecoveryTransaction automationRunRecoveryTransaction;
     private final AutomationPublicationService automationPublicationService;
+    private final AutomationPublicationDecisionRepository automationPublicationDecisionRepository;
+    private final AutomationSourceRelationDiagnosticRepository automationSourceRelationDiagnosticRepository;
     private final ObjectMapper objectMapper;
 
     public AutomationAdminService(
@@ -61,6 +63,8 @@ public class AutomationAdminService {
             AutomationRunRecoveryService automationRunRecoveryService,
             AutomationRunRecoveryTransaction automationRunRecoveryTransaction,
             AutomationPublicationService automationPublicationService,
+            AutomationPublicationDecisionRepository automationPublicationDecisionRepository,
+            AutomationSourceRelationDiagnosticRepository automationSourceRelationDiagnosticRepository,
             ObjectMapper objectMapper) {
         this.automationTopicRepository = automationTopicRepository;
         this.automationSourceRepository = automationSourceRepository;
@@ -79,6 +83,8 @@ public class AutomationAdminService {
         this.automationRunRecoveryService = automationRunRecoveryService;
         this.automationRunRecoveryTransaction = automationRunRecoveryTransaction;
         this.automationPublicationService = automationPublicationService;
+        this.automationPublicationDecisionRepository = automationPublicationDecisionRepository;
+        this.automationSourceRelationDiagnosticRepository = automationSourceRelationDiagnosticRepository;
         this.objectMapper = objectMapper;
     }
 
@@ -211,18 +217,23 @@ public class AutomationAdminService {
                 .map(snapshot -> new AutomationRunDetailResponse.SourceSnapshotResponse(
                         snapshot.getId(),
                         snapshot.getSourceUrl(),
+                        snapshot.getFetchedUrl(),
                         snapshot.getCanonicalUrl(),
                         snapshot.getOriginHost(),
                         snapshot.getTitle(),
                         snapshot.getHttpStatus(),
                         snapshot.getPolicyResult(),
                         snapshot.getContentHash(),
+                        snapshot.getBodyTextHash(),
+                        snapshot.getLineageExtractionStatus(),
+                        explicitUpstreamUrls(snapshot.getExplicitUpstreamUrlsJson()),
                         snapshot.getRetrievedAt()))
                 .toList();
         var generatedDraft = generatedDraft(runId);
         return new AutomationRunDetailResponse(
                 toRunResponse(run),
                 snapshots,
+                publicationDecision(runId),
                 generatedDraft,
                 new AutomationRunDetailResponse.AvailableActionsResponse(
                         canRetry(run),
@@ -419,6 +430,45 @@ public class AutomationAdminService {
                     }
                 })
                 .orElse(null);
+    }
+
+    private AutomationRunDetailResponse.PublicationDecisionResponse publicationDecision(Long runId) {
+        return automationPublicationDecisionRepository.findByRunId(runId)
+                .map(decision -> new AutomationRunDetailResponse.PublicationDecisionResponse(
+                        decision.getOutcome(),
+                        decision.getHoldReason(),
+                        decision.getDetailReason(),
+                        decision.getDecisionJson(),
+                        automationSourceRelationDiagnosticRepository.findAllByRunIdOrderByIdAsc(runId).stream()
+                                .map(relation -> new AutomationRunDetailResponse.SourceRelationDiagnosticResponse(
+                                        relation.getLeftSnapshotId(),
+                                        relation.getRightSnapshotId(),
+                                        relation.getRelationType(),
+                                        relation.getEvidenceValue()))
+                                .toList()))
+                .orElse(null);
+    }
+
+    private List<String> explicitUpstreamUrls(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            var node = objectMapper.readTree(json);
+            if (!node.isArray()) {
+                return List.of();
+            }
+            var urls = new ArrayList<String>();
+            for (var urlNode : node) {
+                var value = urlNode.asText();
+                if (value != null && !value.isBlank()) {
+                    urls.add(value);
+                }
+            }
+            return List.copyOf(urls);
+        } catch (Exception exception) {
+            return List.of();
+        }
     }
 
     private boolean canRetry(AutomationRun run) {

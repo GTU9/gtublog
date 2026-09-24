@@ -553,6 +553,27 @@ export function AutomationControlCenter({
                 {formatResolutionStatus(runDetail.run.resolutionStatus) ? ` · 처리 상태 ${formatResolutionStatus(runDetail.run.resolutionStatus)}` : ""}
               </p>
               <p className="muted">{buildRunGuidance(runDetail)}</p>
+              {runDetail.publicationDecision ? (
+                <div className="stack">
+                  <p className="muted">
+                    출처 검증: {runDetail.publicationDecision.detailReason === "SHARED_UPSTREAM"
+                      ? "같은 상위 보고서의 근거가 확인되어 자동 발행을 보류했습니다."
+                      : runDetail.publicationDecision.detailReason === "CLAIM_EVIDENCE_UNVERIFIED"
+                        ? "핵심 주장별 근거가 검증되지 않아 자동 발행을 보류했습니다."
+                        : runDetail.publicationDecision.detailReason ?? runDetail.publicationDecision.outcome}
+                  </p>
+                  {runDetail.publicationDecision.relations.length > 0 ? (
+                    <ul className="admin-list">
+                      {runDetail.publicationDecision.relations.map((relation) => (
+                        <li key={`${relation.leftSnapshotId}-${relation.rightSnapshotId}-${relation.relationType}`}>
+                          스냅샷 #{relation.leftSnapshotId} · #{relation.rightSnapshotId}: {relation.relationType}
+                          {relation.evidenceValue ? ` · ${relation.evidenceValue}` : ""}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="inline-actions">
                 <button type="button" className="secondary-button" disabled={!runDetail.availableActions.canRetry || actionPending !== null} onClick={() => onRetryRun(runDetail.run.id)}>
                   {actionPending === "retry" ? "재시도 중..." : "재시도"}
@@ -570,7 +591,7 @@ export function AutomationControlCenter({
                   <p><strong>{runDetail.generatedDraft.title}</strong></p>
                   <p className="muted">{runDetail.generatedDraft.excerpt}</p>
                   <p className="muted">
-                    인용 스냅샷 {citationCount}건 · 독립 출처 호스트 {uniqueOriginHosts}개
+                    인용 스냅샷 {citationCount}건 · 서로 다른 호스트 {uniqueOriginHosts}개 (독립성 미검증)
                   </p>
                   {runDetail.generatedDraft.taxonomy ? (
                     <p className="muted">선택한 분류: 카테고리 #{runDetail.generatedDraft.taxonomy.categoryId} · 태그 {runDetail.generatedDraft.taxonomy.tagIds.map((id) => `#${id}`).join(", ")}</p>
@@ -588,6 +609,12 @@ export function AutomationControlCenter({
                       {snapshot.originHost} · {formatPolicyResult(snapshot.policyResult)} · HTTP {snapshot.httpStatus} · 수집 {formatDateTime(snapshot.retrievedAt)}
                     </span>
                     <span className="muted">{snapshot.canonicalUrl}</span>
+                    {snapshot.lineageExtractionStatus ? (
+                      <span className="muted">계보 추출: {snapshot.lineageExtractionStatus}</span>
+                    ) : null}
+                    {snapshot.explicitUpstreamUrls?.length ? (
+                      <span className="muted">명시적 상위 보고서: {snapshot.explicitUpstreamUrls.join(", ")}</span>
+                    ) : null}
                   </li>
                 ))}
               </ul>

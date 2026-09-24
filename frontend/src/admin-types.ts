@@ -140,6 +140,18 @@ export type AutomationRunResponse = {
 
 export type AutomationRunDetailResponse = {
   run: AutomationRunResponse;
+  publicationDecision?: {
+    outcome: string;
+    holdReason: string | null;
+    detailReason: string | null;
+    decisionJson: string;
+    relations: {
+      leftSnapshotId: number;
+      rightSnapshotId: number;
+      relationType: string;
+      evidenceValue: string | null;
+    }[];
+  } | null;
   generatedDraft: {
     title: string;
     excerpt: string;
@@ -155,12 +167,16 @@ export type AutomationRunDetailResponse = {
   snapshots: {
     id: number;
     sourceUrl: string;
+    fetchedUrl?: string | null;
     canonicalUrl: string;
     originHost: string;
     title: string;
     httpStatus: number;
     policyResult: string;
     contentHash: string;
+    bodyTextHash?: string | null;
+    lineageExtractionStatus?: string | null;
+    explicitUpstreamUrls?: string[];
     retrievedAt: string;
   }[];
 };

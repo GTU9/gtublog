@@ -299,6 +299,13 @@ function createInitialAutomationRunDetails(runs: AutomationRunResponse[]) {
       302,
       {
         run: runs[1],
+        publicationDecision: {
+          outcome: "HELD",
+          holdReason: runs[1].holdReason,
+          detailReason: "CLAIM_EVIDENCE_UNVERIFIED",
+          decisionJson: "{}",
+          relations: [],
+        },
         generatedDraft: {
           title: "보류된 자동 초안",
           excerpt: "출처가 부족해서 자동 발행이 보류된 초안입니다.",
@@ -367,6 +374,12 @@ function cloneAutomationRun(run: AutomationRunResponse): AutomationRunResponse {
 function cloneAutomationRunDetail(detail: AutomationRunDetailResponse): AutomationRunDetailResponse {
   return {
     run: cloneAutomationRun(detail.run),
+    publicationDecision: detail.publicationDecision
+      ? {
+          ...detail.publicationDecision,
+          relations: detail.publicationDecision.relations.map((relation) => ({ ...relation })),
+        }
+      : null,
     generatedDraft: detail.generatedDraft
       ? {
           ...detail.generatedDraft,

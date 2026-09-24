@@ -75,6 +75,10 @@ v2 terminal request는 UUID와 canonical UTF-8 JSON의 SHA-256 digest를 함께 
 
 자동 생성 글을 관리자가 수정할 때는 최초 `AUTOMATION` 리비전으로 출처를 판단합니다. Markdown을 바꾸지 않은 저장은 기존 HTML을 유지하고, Markdown을 바꾼 저장은 Spring이 같은 렌더러로 다시 정화합니다. 관리자 화면의 편집 중 미리보기는 간이 표현이며, 저장 후 다시 불러온 HTML이 공개 결과입니다. 수동 작성 글의 HTML 입력 방식은 그대로 유지됩니다.
 
+### 출처 계보와 검증 대기
+
+자동 발행은 출처 호스트 수만으로 독립성을 판단할 수 없습니다. 재배포 페이지와 같은 상위 보고서를 가리키는 출처는 하나의 근거로 취급해야 하며, 글의 제목·요약·본문에 있는 핵심 주장마다 실질적인 지지가 확인되어야 합니다. 현재 v3 생성 결과에는 주장별 검증 증거가 없으므로 새 실행의 자동 공개를 보류하고 관리자에게 근거와 사유를 표시합니다. 이미 발행한 글과 완료된 실행은 재작성하지 않습니다. 허용된 보류만 Story 17의 인증·감사된 수동 발행 절차를 따르며, 출처 차단이나 중복은 수동 발행할 수 없습니다. 관리자 재시도는 새 실행에서 출처를 다시 수집하므로 이전 보류 판단을 지우지 않습니다. 주장별 검증과 자동 발행 재개는 후속 스토리의 검증 완료 전까지 수행하지 않습니다.
+
 Codex SDK production 실행은 의도적으로 동결되어 있습니다. 현재 `GENERATION_CODEX_CANARY_ATTESTATION_PATH`의 v1 JSON과 `artifactDigest` 일치는 **이미지 동일성 확인일 뿐 운영 승인 근거가 아닙니다**. host mount JSON에는 발급자, 서명, 신선도, 독립 재시작 증명이 없으므로 어떤 local smoke나 candidate canary도 이를 `result: passed`로 바꾸어 worker를 활성화해서는 안 됩니다. 기존 boolean 플래그는 test process에서만 허용됩니다. 상세 결정은 [CR-002](./change-requests/CR-002-block-codex-sdk-production-adapter.md)를 따릅니다.
 
 CR-003의 `openai-responses` provider는 Codex CLI나 agent tool process를 실행하지 않는 별도 선택 경로입니다. `GENERATION_PROVIDER=openai-responses`, `OPENAI_API_KEY`, `GENERATION_OPENAI_RESPONSES_MODEL`을 외부 설정으로 모두 제공해야만 선택되며, 요청은 `tools: []`, `tool_choice: "none"`, `store: false`, strict JSON Schema를 고정합니다. 이 선택은 Spring의 발행 게이트를 우회하지 않으며 실제 운영 API 호출과 배포 smoke는 별도 release story에서 승인·검증합니다.
