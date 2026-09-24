@@ -235,28 +235,23 @@ public class AutomationAdminService {
         return new AutomationRunRecoveryResponse(runId, automationRunRecoveryTransaction.recover(runId, automationRunRepository.currentDatabaseUtc()));
     }
 
-    @Transactional
     public AutomationRunResponse retryHeldRun(Long runId) {
-        var run = automationRunRepository.findByIdForUpdate(runId).orElseThrow(() -> new NoSuchElementException("Automation run not found."));
-        if (!canRetry(run)) {
-            throw new IllegalStateException("Only unresolved held automation runs can be retried.");
-        }
-        var retried = createOrReuseRun(run.getTopicId(), null, runId, "RETRY", "retry:%d:%s".formatted(runId, UUID.randomUUID()));
-        run.markRetried(retried.run().getId());
-        auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.AUTOMATION, runId.toString(), "AUTOMATION_RUN_RETRIED", Map.of("retryRunId", retried.run().getId()));
-        var enabledSources = automationSourceRepository.findAllByTopicIdAndEnabledTrueOrderByIdAsc(run.getTopicId());
+        var retried = automationRunLifecycleService.startRetry(runId);
+        var enabledSources = automationSourceRepository.findAllByTopicIdAndEnabledTrueOrderByIdAsc(retried.topicId());
         if (enabledSources.isEmpty()) {
-            automationRunLifecycleService.hold(retried.run().getId(), AutomationHoldReason.NO_ENABLED_SOURCES);
-            return runDetail(retried.run().getId()).run();
+            automationRunLifecycleService.hold(retried.runId(), AutomationHoldReason.NO_ENABLED_SOURCES);
+            return runDetail(retried.runId()).run();
         }
-        var result = sourceCollectionService.collect(run.getTopicId(), retried.run().getId(), enabledSources);
+        var result = sourceCollectionService.collect(
+                retried.topicId(), retried.runId(), enabledSources, retried.leaseExpiresAt());
         if (result.holdReason() == null) {
-            var topic = automationTopicRepository.findById(run.getTopicId()).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
-            generationJobService.enqueueForRun(topic, retried.run(), result.snapshots());
+            var topic = automationTopicRepository.findById(retried.topicId()).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
+            var activeRun = automationRunRepository.findById(retried.runId()).orElseThrow(() -> new NoSuchElementException("Automation run not found."));
+            generationJobService.enqueueForRun(topic, activeRun, result.snapshots());
         } else {
-            automationRunLifecycleService.hold(retried.run().getId(), result.holdReason());
+            automationRunLifecycleService.hold(retried.runId(), result.holdReason());
         }
-        return runDetail(retried.run().getId()).run();
+        return runDetail(retried.runId()).run();
     }
 
     @Transactional
@@ -357,7 +352,8 @@ public class AutomationAdminService {
             return runDetail(creation.run().getId()).run();
         }
 
-        var result = sourceCollectionService.collect(topicId, creation.run().getId(), enabledSources);
+        var result = sourceCollectionService.collect(
+                topicId, creation.run().getId(), enabledSources, creation.run().getLeaseExpiresAt());
         if (result.holdReason() == null) {
             var topic = automationTopicRepository.findById(topicId).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
             generationJobService.enqueueForRun(topic, creation.run(), result.snapshots());

@@ -18,7 +18,10 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -94,6 +97,9 @@ class AutomationPipelineIntegrationTests {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private DataSource dataSource;
 
     @Autowired
     private JwtEncoder jwtEncoder;
@@ -703,6 +709,70 @@ class AutomationPipelineIntegrationTests {
     }
 
     @Test
+    void retryReleasesThePreviousRunLockBeforeCollectingDelayedRssFeed() throws Exception {
+        var feedPath = "/retry-lock-delayed-rss.xml";
+        var articlePath = "/retry-lock-article";
+        stubDelayedRssFeed(feedPath, articlePath, 1500);
+        stubAccessibleSource(articlePath, "https://example.com/retry-lock-article");
+        var topic = automationAdminService.createTopic(new AutomationTopicRequest(null, "Retry Lock Topic", "v1", true));
+        var heldRun = automationAdminService.triggerManualRun(topic.id(), "retry-lock-held");
+        automationAdminService.createSource(topic.id(), new AutomationSourceRequest(
+                AutomationSourceType.RSS,
+                WIREMOCK.baseUrl() + feedPath,
+                true));
+
+        try (var executor = Executors.newSingleThreadExecutor()) {
+            var retry = executor.submit(() -> automationAdminService.retryHeldRun(heldRun.id()));
+            waitForWireMockRequest(feedPath);
+
+            assertThat(previousRunCanBeLockedNowait(heldRun.id())).isTrue();
+
+            var retryRun = retry.get(5, TimeUnit.SECONDS);
+            assertThat(retryRun.retryOfRunId()).isEqualTo(heldRun.id());
+        }
+    }
+
+    @Test
+    void concurrentRetriesCreateAtMostOneRetryRun() throws Exception {
+        var feedPath = "/retry-concurrent-delayed-rss.xml";
+        var articlePath = "/retry-concurrent-article";
+        stubDelayedRssFeed(feedPath, articlePath, 1000);
+        stubAccessibleSource(articlePath, "https://example.com/retry-concurrent-article");
+        var topic = automationAdminService.createTopic(new AutomationTopicRequest(null, "Retry Concurrent Topic", "v1", true));
+        var heldRun = automationAdminService.triggerManualRun(topic.id(), "retry-concurrent-held");
+        automationAdminService.createSource(topic.id(), new AutomationSourceRequest(
+                AutomationSourceType.RSS,
+                WIREMOCK.baseUrl() + feedPath,
+                true));
+        var startGate = new CountDownLatch(1);
+
+        try (var executor = Executors.newFixedThreadPool(2)) {
+            Callable<Long> retry = () -> {
+                startGate.await(2, TimeUnit.SECONDS);
+                try {
+                    return automationAdminService.retryHeldRun(heldRun.id()).id();
+                } catch (IllegalStateException expected) {
+                    return null;
+                }
+            };
+            var first = executor.submit(retry);
+            var second = executor.submit(retry);
+
+            startGate.countDown();
+            var firstRetryRunId = first.get(5, TimeUnit.SECONDS);
+            var secondRetryRunId = second.get(5, TimeUnit.SECONDS);
+
+            assertThat(new Long[] {firstRetryRunId, secondRetryRunId})
+                    .filteredOn(id -> id != null)
+                    .hasSize(1);
+        }
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM automation_run WHERE retry_of_run_id = ?",
+                Integer.class,
+                heldRun.id())).isEqualTo(1);
+    }
+
+    @Test
     void administratorCanCancelAnActiveRunAndItsPendingGenerationJob() throws Exception {
         stubAccessibleSource("/cancel-feed-a", "https://example.com/cancel-feed-a");
         stubAccessibleSource("/cancel-feed-b", "https://example.org/cancel-feed-b");
@@ -919,6 +989,55 @@ class AutomationPipelineIntegrationTests {
                                   </body>
                                 </html>
                                 """.formatted(canonicalUrl))));
+    }
+
+    private void stubDelayedRssFeed(String feedPath, String articlePath, int fixedDelayMillis) {
+        WIREMOCK.stubFor(com.github.tomakehurst.wiremock.client.WireMock.get(urlEqualTo(feedPath))
+                .willReturn(aResponse()
+                        .withFixedDelay(fixedDelayMillis)
+                        .withStatus(200)
+                        .withHeader("Content-Type", "application/rss+xml; charset=utf-8")
+                        .withBody("""
+                                <rss version="2.0">
+                                  <channel>
+                                    <title>Delayed Retry Feed</title>
+                                    <item>
+                                      <title>Delayed retry article</title>
+                                      <link>%s%s</link>
+                                      <description>Retry collection waits on this feed before fetching the article.</description>
+                                    </item>
+                                  </channel>
+                                </rss>
+                                """.formatted(WIREMOCK.baseUrl(), articlePath))));
+    }
+
+    private void waitForWireMockRequest(String path) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+        while (System.nanoTime() < deadline) {
+            if (WIREMOCK.countRequestsMatching(
+                    com.github.tomakehurst.wiremock.client.WireMock.getRequestedFor(urlEqualTo(path)).build())
+                    .getCount() > 0) {
+                return;
+            }
+            TimeUnit.MILLISECONDS.sleep(25);
+        }
+        throw new AssertionError("Timed out waiting for WireMock request to " + path);
+    }
+
+    private boolean previousRunCanBeLockedNowait(Long runId) throws Exception {
+        try (var connection = dataSource.getConnection();
+             var statement = connection.prepareStatement("SELECT id FROM automation_run WHERE id = ? FOR UPDATE NOWAIT")) {
+            connection.setAutoCommit(false);
+            statement.setLong(1, runId);
+            try (var rows = statement.executeQuery()) {
+                var locked = rows.next();
+                connection.rollback();
+                return locked;
+            } catch (Exception exception) {
+                connection.rollback();
+                return false;
+            }
+        }
     }
 
     private String successSubmitBody(

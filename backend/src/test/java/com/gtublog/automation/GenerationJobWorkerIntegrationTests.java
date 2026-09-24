@@ -40,7 +40,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 @Tag("docker")
-@SpringBootTest
+@SpringBootTest(properties = "spring.quartz.auto-startup=false")
 class GenerationJobWorkerIntegrationTests {
 
     private static final String MYSQL_IMAGE =
@@ -617,7 +617,9 @@ class GenerationJobWorkerIntegrationTests {
                 WIREMOCK.baseUrl().replace("localhost", "127.0.0.1") + "/worker-feed-2",
                 true));
         var run = automationAdminService.triggerManualRun(topic.id(), "story-8-run");
-        return generationJobRepository.findByRunId(run.id()).orElseThrow();
+        return generationJobRepository.findByRunId(run.id())
+                .orElseThrow(() -> new IllegalStateException("No job for run " + run.id()
+                        + " (status=" + run.status() + ", hold=" + run.holdReason() + ")"));
     }
 
     private GenerationJob seedSingleSourceGenerationJob() {

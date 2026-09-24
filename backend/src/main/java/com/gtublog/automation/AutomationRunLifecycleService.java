@@ -106,6 +106,33 @@ public class AutomationRunLifecycleService {
     public record StartResult(AutomationRun run, boolean createdNew) {
     }
 
+    @Transactional
+    public RetryResult startRetry(Long runId) {
+        var previous = automationRunRepository.findByIdForUpdate(runId)
+                .orElseThrow(() -> new NoSuchElementException("Automation run not found."));
+        if (previous.getStatus() != AutomationRunStatus.HELD || previous.getResolutionStatus() != null) {
+            throw new IllegalStateException("Only unresolved held automation runs can be retried.");
+        }
+        var retry = start(
+                previous.getTopicId(),
+                null,
+                runId,
+                "RETRY",
+                "retry:%d:%s".formatted(runId, UUID.randomUUID()));
+        previous.markRetried(retry.run().getId());
+        auditService.record(
+                AuditActorType.ADMIN,
+                "1",
+                AuditTargetType.AUTOMATION,
+                runId.toString(),
+                "AUTOMATION_RUN_RETRIED",
+                Map.of("retryRunId", retry.run().getId()));
+        return new RetryResult(previous.getTopicId(), retry.run().getId(), retry.run().getLeaseExpiresAt());
+    }
+
+    public record RetryResult(Long topicId, Long runId, LocalDateTime leaseExpiresAt) {
+    }
+
     private LocalDateTime now() {
         return LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
     }

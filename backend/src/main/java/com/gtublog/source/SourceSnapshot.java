@@ -26,8 +26,14 @@ public class SourceSnapshot extends BaseEntity {
     @Column(name = "automation_run_id")
     private Long automationRunId;
 
-    @Column(name = "source_url", nullable = false, length = 1024)
+    @Column(name = "source_url", nullable = false, length = 512)
     private String sourceUrl;
+
+    @Column(name = "source_feed_url", length = 512)
+    private String sourceFeedUrl;
+
+    @Column(name = "source_feed_entry_key", length = 512)
+    private String sourceFeedEntryKey;
 
     @Column(name = "canonical_url", length = 1024)
     private String canonicalUrl;
@@ -70,6 +76,8 @@ public class SourceSnapshot extends BaseEntity {
             Long automationSourceId,
             Long automationRunId,
             String sourceUrl,
+            String sourceFeedUrl,
+            String sourceFeedEntryKey,
             String canonicalUrl,
             String originHost,
             String title,
@@ -85,6 +93,8 @@ public class SourceSnapshot extends BaseEntity {
         this.automationSourceId = automationSourceId;
         this.automationRunId = automationRunId;
         this.sourceUrl = sourceUrl;
+        this.sourceFeedUrl = sourceFeedUrl;
+        this.sourceFeedEntryKey = sourceFeedEntryKey;
         this.canonicalUrl = canonicalUrl;
         this.originHost = originHost;
         this.title = title;
@@ -119,6 +129,46 @@ public class SourceSnapshot extends BaseEntity {
                 automationSourceId,
                 automationRunId,
                 sourceUrl,
+                null,
+                null,
+                canonicalUrl,
+                originHost,
+                title,
+                retrievedAt,
+                httpStatus,
+                etag,
+                lastModifiedHeader,
+                contentHash,
+                policyResult,
+                bodyExcerpt);
+    }
+
+    public static SourceSnapshot createFeedEntrySnapshot(
+            String snapshotKey,
+            Long topicId,
+            Long automationSourceId,
+            Long automationRunId,
+            String sourceUrl,
+            String sourceFeedUrl,
+            String sourceFeedEntryKey,
+            String canonicalUrl,
+            String originHost,
+            String title,
+            LocalDateTime retrievedAt,
+            int httpStatus,
+            String etag,
+            String lastModifiedHeader,
+            String contentHash,
+            SourcePolicyResult policyResult,
+            String bodyExcerpt) {
+        return new SourceSnapshot(
+                snapshotKey,
+                topicId,
+                automationSourceId,
+                automationRunId,
+                sourceUrl,
+                sourceFeedUrl,
+                sourceFeedEntryKey,
                 canonicalUrl,
                 originHost,
                 title,
@@ -141,6 +191,14 @@ public class SourceSnapshot extends BaseEntity {
 
     public String getSourceUrl() {
         return sourceUrl;
+    }
+
+    public String getSourceFeedUrl() {
+        return sourceFeedUrl;
+    }
+
+    public String getSourceFeedEntryKey() {
+        return sourceFeedEntryKey;
     }
 
     public String getCanonicalUrl() {
