@@ -304,6 +304,7 @@ function createInitialAutomationRunDetails(runs: AutomationRunResponse[]) {
           excerpt: "출처가 부족해서 자동 발행이 보류된 초안입니다.",
           contentMarkdown: "# 보류된 자동 초안\n\n검토 후 수동 발행할 수 있습니다.",
           citationSnapshotIds: [5003],
+          taxonomy: { categoryId: 2, tagIds: [12] },
         },
         availableActions: {
           canRetry: true,
@@ -370,6 +371,9 @@ function cloneAutomationRunDetail(detail: AutomationRunDetailResponse): Automati
       ? {
           ...detail.generatedDraft,
           citationSnapshotIds: [...detail.generatedDraft.citationSnapshotIds],
+          taxonomy: detail.generatedDraft.taxonomy
+            ? { categoryId: detail.generatedDraft.taxonomy.categoryId, tagIds: [...detail.generatedDraft.taxonomy.tagIds] }
+            : null,
         }
       : null,
     availableActions: { ...detail.availableActions },

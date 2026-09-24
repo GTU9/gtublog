@@ -1,4 +1,4 @@
-import { generationDraftJsonSchema, validateGenerationDraft } from "./draft-schema.js";
+import { generationDraftJsonSchema, generationDraftJsonSchemaV3, validateGenerationDraft } from "./draft-schema.js";
 import type { GenerationProvider, GenerationRequest, GenerationResult } from "./provider.js";
 
 const responsesEndpoint = "https://api.openai.com/v1/responses";
@@ -37,7 +37,9 @@ export function createOpenAIResponsesGenerationProvider(options: OpenAIResponses
           },
           body: JSON.stringify({
             model: options.model,
-            input: request.prompt,
+            input: request.schemaVersion === "automation-job-v3"
+              ? `${request.prompt}\n\nChoose taxonomy IDs only from this approved catalog: ${JSON.stringify(request.taxonomyCatalog)}`
+              : request.prompt,
             tools: [],
             tool_choice: "none",
             store: false,
@@ -46,7 +48,7 @@ export function createOpenAIResponsesGenerationProvider(options: OpenAIResponses
                 type: "json_schema",
                 name: "generation_draft",
                 strict: true,
-                schema: generationDraftJsonSchema,
+                schema: request.schemaVersion === "automation-job-v3" ? generationDraftJsonSchemaV3 : generationDraftJsonSchema,
               },
             },
           }),
@@ -77,7 +79,7 @@ export function createOpenAIResponsesGenerationProvider(options: OpenAIResponses
       if (!outputText) throw new Error("OpenAI Responses returned no structured draft.");
 
       try {
-        return validateGenerationDraft(JSON.parse(outputText) as unknown, "openai-responses");
+        return validateGenerationDraft(JSON.parse(outputText) as unknown, "openai-responses", request.schemaVersion);
       } catch (error) {
         if (error instanceof SyntaxError) throw new Error("OpenAI Responses returned malformed structured output.");
         throw error;

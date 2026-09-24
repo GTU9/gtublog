@@ -145,6 +145,7 @@ export type AutomationRunDetailResponse = {
     excerpt: string;
     contentMarkdown: string;
     citationSnapshotIds: number[];
+    taxonomy?: { categoryId: number; tagIds: number[] } | null;
   } | null;
   availableActions: {
     canRetry: boolean;

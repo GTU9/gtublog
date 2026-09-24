@@ -1,7 +1,9 @@
-import type { GenerationProvider, GenerationRequest, GenerationSnapshot } from "./provider.js";
+import type { GenerationProvider, GenerationRequest, GenerationSnapshot, TaxonomyCatalog, TaxonomySelection, TaxonomyTerm } from "./provider.js";
+import { InvalidGenerationDraftError } from "./draft-schema.js";
 import { terminalPayloadDigest, terminalSubmissionId } from "./terminal.js";
 
 export const CONTRACT_SCHEMA_VERSION = "automation-job-v2";
+export const CONTRACT_SCHEMA_VERSION_V3 = "automation-job-v3";
 
 export interface GenerationClaimRequest { readonly workerId: string; readonly supportedProviders: ReadonlyArray<string>; readonly supportedSchemaVersions: ReadonlyArray<string>; }
 export interface GenerationClaimResponse {
@@ -9,13 +11,14 @@ export interface GenerationClaimResponse {
   readonly leaseOwner: string; readonly leaseExpiresAt: string; readonly providerName: string;
   readonly promptVersion: string; readonly schemaVersion: string; readonly prompt: string;
   readonly snapshots: ReadonlyArray<GenerationSnapshot>;
+  readonly taxonomyCatalog?: TaxonomyCatalog;
 }
 export interface GenerationHeartbeatRequest { readonly workerId: string; }
 export interface GenerationHeartbeatResponse { readonly jobId: number; readonly status: string; readonly serverTime: string; readonly leaseExpiresAt: string; }
 export interface GenerationSubmitRequest {
   readonly terminalSubmissionId: string; readonly payloadDigest: string; readonly workerId: string;
   readonly providerName: string; readonly promptVersion: string; readonly schemaVersion: string;
-  readonly draft?: { readonly title: string; readonly excerpt: string; readonly contentMarkdown: string; readonly citationSnapshotIds: ReadonlyArray<number>; };
+  readonly draft?: { readonly title: string; readonly excerpt: string; readonly contentMarkdown: string; readonly citationSnapshotIds: ReadonlyArray<number>; readonly taxonomy?: TaxonomySelection; };
   readonly failureReason?: string;
 }
 export interface GenerationSubmitResponse { readonly jobId: number; readonly status: string; readonly submittedAt: string; readonly terminalSubmissionId: string; readonly payloadDigest: string; }
@@ -48,7 +51,7 @@ interface BackendGenerationClientOptions {
 export function createWorkerRuntime({ client, provider, heartbeatIntervalMs = 30_000, generationTimeoutMs = 240_000, leaseSafetyMarginMs = 45_000, shutdownGraceMs = 20_000 }: WorkerRuntimeDependencies) {
   return {
     async runOnce(workerId: string, shutdownSignal?: AbortSignal): Promise<GenerationClaimResponse | null> {
-      const claim = await client.claim({ workerId, supportedProviders: [provider.name], supportedSchemaVersions: [CONTRACT_SCHEMA_VERSION] }, shutdownSignal);
+      const claim = await client.claim({ workerId, supportedProviders: [provider.name], supportedSchemaVersions: [CONTRACT_SCHEMA_VERSION_V3, CONTRACT_SCHEMA_VERSION] }, shutdownSignal);
       if (!claim) return null;
       assertClaimResponse(claim);
       if (claim.leaseOwner !== workerId || claim.providerName !== provider.name) throw new BackendOperationError("claim", 200, "fatal", "Generation claim identity did not match this worker.");
@@ -102,6 +105,9 @@ export function createWorkerRuntime({ client, provider, heartbeatIntervalMs = 30
       let result;
       try {
         result = await provider.generate(toGenerationRequest(claim), signal);
+        if (claim.schemaVersion === CONTRACT_SCHEMA_VERSION_V3 && !validTaxonomySelection(result.taxonomy)) {
+          throw new InvalidGenerationDraftError("taxonomy");
+        }
       } catch (error) {
         const controlFailure: unknown = heartbeatFailure ?? (signal.aborted ? signal.reason as unknown : undefined);
         clearTimeout(generationDeadline);
@@ -128,7 +134,8 @@ export function createWorkerRuntime({ client, provider, heartbeatIntervalMs = 30
       const successTerminal = withDigest({
         terminalSubmissionId: terminalSubmissionId(), workerId, providerName: claim.providerName,
         promptVersion: claim.promptVersion, schemaVersion: claim.schemaVersion,
-        draft: { title: result.title, excerpt: result.excerpt, contentMarkdown: result.contentMarkdown, citationSnapshotIds: result.citationSnapshotIds },
+        draft: { title: result.title, excerpt: result.excerpt, contentMarkdown: result.contentMarkdown, citationSnapshotIds: result.citationSnapshotIds,
+          ...(claim.schemaVersion === CONTRACT_SCHEMA_VERSION_V3 ? { taxonomy: result.taxonomy } : {}) },
       });
       try {
         // Once a success payload exists it is immutable: transport ambiguity may only retry this exact payload.
@@ -166,7 +173,7 @@ export function createBackendGenerationClient({ baseUrl, token, requestTimeoutMs
 
 export function assertClaimResponse(value: unknown): asserts value is GenerationClaimResponse {
   const c = value as Partial<GenerationClaimResponse> | null;
-  if (!c || !positiveInteger(c.jobId) || !boundedString(c.jobKey, 1, 36) || !positiveInteger(c.runId) || !positiveInteger(c.topicId) || !boundedString(c.leaseOwner, 1, 120) || !validInstant(c.leaseExpiresAt) || !boundedString(c.providerName, 1, 64) || !boundedString(c.promptVersion, 1, 64) || c.schemaVersion !== CONTRACT_SCHEMA_VERSION || !boundedString(c.prompt, 1, 100_000) || !Array.isArray(c.snapshots) || c.snapshots.length < 1 || c.snapshots.length > 100 || !c.snapshots.every(validSnapshot)) throw new Error("Invalid generation claim payload.");
+  if (!c || !positiveInteger(c.jobId) || !boundedString(c.jobKey, 1, 36) || !positiveInteger(c.runId) || !positiveInteger(c.topicId) || !boundedString(c.leaseOwner, 1, 120) || !validInstant(c.leaseExpiresAt) || !boundedString(c.providerName, 1, 64) || !boundedString(c.promptVersion, 1, 64) || !supportedSchemaVersion(c.schemaVersion) || !boundedString(c.prompt, 1, 100_000) || !Array.isArray(c.snapshots) || c.snapshots.length < 1 || c.snapshots.length > 100 || !c.snapshots.every(validSnapshot) || (c.schemaVersion === CONTRACT_SCHEMA_VERSION_V3 && !validTaxonomyCatalog(c.taxonomyCatalog))) throw new Error("Invalid generation claim payload.");
 }
 export function assertHeartbeatResponse(value: unknown): asserts value is GenerationHeartbeatResponse {
   const c = value as Partial<GenerationHeartbeatResponse> | null;
@@ -179,9 +186,10 @@ export function assertSubmitResponse(value: unknown, request?: GenerationSubmitR
 }
 export function assertSubmitRequest(value: unknown): asserts value is GenerationSubmitRequest {
   const c = value as Partial<GenerationSubmitRequest> | null;
-  if (!c || typeof c.terminalSubmissionId !== "string" || !/^[0-9a-f-]{36}$/iu.test(c.terminalSubmissionId) || !/^[0-9a-f]{64}$/u.test(c.payloadDigest ?? "") || !boundedString(c.workerId, 1, 120) || !boundedString(c.providerName, 1, 64) || !boundedString(c.promptVersion, 1, 64) || c.schemaVersion !== CONTRACT_SCHEMA_VERSION || Boolean(c.failureReason) === Boolean(c.draft)) throw new Error("Invalid generation submit payload.");
+  if (!c || typeof c.terminalSubmissionId !== "string" || !/^[0-9a-f-]{36}$/iu.test(c.terminalSubmissionId) || !/^[0-9a-f]{64}$/u.test(c.payloadDigest ?? "") || !boundedString(c.workerId, 1, 120) || !boundedString(c.providerName, 1, 64) || !boundedString(c.promptVersion, 1, 64) || !supportedSchemaVersion(c.schemaVersion) || Boolean(c.failureReason) === Boolean(c.draft)) throw new Error("Invalid generation submit payload.");
   if (c.failureReason !== undefined && !boundedString(c.failureReason, 1, 500)) throw new Error("Invalid generation failure reason.");
   if (c.draft && (!boundedString(c.draft.title, 1, 300) || !boundedString(c.draft.excerpt, 1, 1_000) || !boundedString(c.draft.contentMarkdown, 1, 100_000) || !Array.isArray(c.draft.citationSnapshotIds) || c.draft.citationSnapshotIds.length < 1 || c.draft.citationSnapshotIds.length > 100 || !c.draft.citationSnapshotIds.every(positiveInteger) || new Set(c.draft.citationSnapshotIds).size !== c.draft.citationSnapshotIds.length)) throw new Error("Invalid generation draft payload.");
+  if (c.draft && c.schemaVersion === CONTRACT_SCHEMA_VERSION_V3 && !validTaxonomySelection(c.draft.taxonomy)) throw new Error("Invalid generation draft taxonomy.");
   const { payloadDigest, ...unsigned } = c as GenerationSubmitRequest;
   if (terminalPayloadDigest(unsigned) !== payloadDigest) throw new Error("Generation terminal payload digest is invalid.");
 }
@@ -223,7 +231,32 @@ function validSnapshot(value: unknown): value is GenerationSnapshot {
     && typeof s.contentHash === "string" && /^[0-9a-f]{64}$/u.test(s.contentHash)
     && validInstant(s.retrievedAt);
 }
-function safeFailureReason(error: unknown): string { return (error instanceof Error ? error.name : "WorkerFailure").slice(0, 120); }
+function safeFailureReason(error: unknown): string {
+  if (error instanceof InvalidGenerationDraftError) return error.message;
+  return (error instanceof Error ? error.name : "WorkerFailure").slice(0, 120);
+}
 export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> { return new Promise((resolve, reject) => { if (signal?.aborted) { reject(asError(signal.reason)); return; } const timer = setTimeout(resolve, ms); signal?.addEventListener("abort", () => { clearTimeout(timer); reject(asError(signal.reason)); }, { once: true }); }); }
 function asError(value: unknown): Error { return value instanceof Error ? value : new Error("Operation aborted."); }
-function toGenerationRequest(claim: GenerationClaimResponse): GenerationRequest { return { jobId: claim.jobKey, runId: claim.runId, topicId: claim.topicId, promptVersion: claim.promptVersion, schemaVersion: claim.schemaVersion, snapshots: claim.snapshots, prompt: claim.prompt }; }
+function toGenerationRequest(claim: GenerationClaimResponse): GenerationRequest { return { jobId: claim.jobKey, runId: claim.runId, topicId: claim.topicId, promptVersion: claim.promptVersion, schemaVersion: claim.schemaVersion, snapshots: claim.snapshots, prompt: claim.prompt, ...(claim.taxonomyCatalog ? { taxonomyCatalog: claim.taxonomyCatalog } : {}) }; }
+
+function supportedSchemaVersion(value: unknown): value is string { return value === CONTRACT_SCHEMA_VERSION || value === CONTRACT_SCHEMA_VERSION_V3; }
+function validTaxonomyTerm(value: unknown): value is TaxonomyTerm {
+  if (!value || typeof value !== "object") return false;
+  const term = value as Partial<TaxonomyTerm>;
+  return positiveInteger(term.id) && boundedString(term.slug, 1, 120) && boundedString(term.name, 1, 120);
+}
+function validTaxonomyCatalog(value: unknown): value is TaxonomyCatalog {
+  if (!value || typeof value !== "object") return false;
+  const catalog = value as Partial<TaxonomyCatalog>;
+  return Array.isArray(catalog.categories) && catalog.categories.length >= 1 && catalog.categories.length <= 100
+    && Array.isArray(catalog.tags) && catalog.tags.length >= 1 && catalog.tags.length <= 200
+    && catalog.categories.every(validTaxonomyTerm) && catalog.tags.every(validTaxonomyTerm)
+    && catalog.categories.every((term, index) => index === 0 || catalog.categories![index - 1].id < term.id)
+    && catalog.tags.every((term, index) => index === 0 || catalog.tags![index - 1].id < term.id);
+}
+function validTaxonomySelection(value: unknown): value is TaxonomySelection {
+  if (!value || typeof value !== "object") return false;
+  const selection = value as Partial<TaxonomySelection>;
+  return positiveInteger(selection.categoryId) && Array.isArray(selection.tagIds)
+    && selection.tagIds.length >= 1 && selection.tagIds.length <= 5 && selection.tagIds.every(positiveInteger);
+}

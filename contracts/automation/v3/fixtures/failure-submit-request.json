@@ -1,0 +1,9 @@
+{
+  "terminalSubmissionId": "33333333-3333-4333-8333-333333333333",
+  "payloadDigest": "e27cf8bfd8055d054250a4f83077ea7996779ebbea5b61e38308b1bcf0b9f2f8",
+  "workerId": "worker-fixture",
+  "providerName": "fake-provider",
+  "promptVersion": "prompt-v1",
+  "schemaVersion": "automation-job-v3",
+  "failureReason": "Fixture failure"
+}

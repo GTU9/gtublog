@@ -1,5 +1,12 @@
 import type { GenerationResult } from "./provider.js";
 
+export class InvalidGenerationDraftError extends Error {
+  constructor(reason: "structure" | "taxonomy") {
+    super(reason === "taxonomy" ? "Generated draft has invalid taxonomy fields." : "Provider returned an invalid structured draft.");
+    this.name = "InvalidGenerationDraftError";
+  }
+}
+
 export const generationDraftJsonSchema = {
   type: "object",
   properties: {
@@ -18,9 +25,26 @@ export const generationDraftJsonSchema = {
   additionalProperties: false,
 } as const;
 
-export function validateGenerationDraft(value: unknown, provider: string): GenerationResult {
+export const generationDraftJsonSchemaV3 = {
+  ...generationDraftJsonSchema,
+  properties: {
+    ...generationDraftJsonSchema.properties,
+    taxonomy: {
+      type: "object",
+      properties: {
+        categoryId: { type: "integer", minimum: 1 },
+        tagIds: { type: "array", items: { type: "integer", minimum: 1 }, minItems: 1, maxItems: 5 },
+      },
+      required: ["categoryId", "tagIds"],
+      additionalProperties: false,
+    },
+  },
+  required: [...generationDraftJsonSchema.required, "taxonomy"],
+} as const;
+
+export function validateGenerationDraft(value: unknown, provider: string, schemaVersion = "automation-job-v2"): GenerationResult {
   if (typeof value !== "object" || value === null) {
-    throw new Error(`${provider} provider returned a non-object response.`);
+    throw new InvalidGenerationDraftError("structure");
   }
 
   const candidate = value as Record<string, unknown>;
@@ -34,8 +58,15 @@ export function validateGenerationDraft(value: unknown, provider: string): Gener
     || !candidate.citationSnapshotIds.every((item) => Number.isSafeInteger(item) && item > 0)
     || new Set(candidate.citationSnapshotIds).size !== candidate.citationSnapshotIds.length
   ) {
-    throw new Error(`${provider} provider returned an invalid structured draft.`);
+    throw new InvalidGenerationDraftError("structure");
   }
+
+  const taxonomy = candidate.taxonomy as Record<string, unknown> | undefined;
+  if (schemaVersion === "automation-job-v3" && (
+    !taxonomy || typeof taxonomy !== "object" || !Number.isSafeInteger(taxonomy.categoryId) || (taxonomy.categoryId as number) <= 0
+    || !Array.isArray(taxonomy.tagIds) || taxonomy.tagIds.length < 1 || taxonomy.tagIds.length > 5
+    || !taxonomy.tagIds.every((id) => Number.isSafeInteger(id) && id > 0)
+  )) throw new InvalidGenerationDraftError("taxonomy");
 
   return {
     title: candidate.title,
@@ -43,6 +74,7 @@ export function validateGenerationDraft(value: unknown, provider: string): Gener
     contentMarkdown: candidate.contentMarkdown,
     citationSnapshotIds: candidate.citationSnapshotIds,
     provider,
+    ...(schemaVersion === "automation-job-v3" ? { taxonomy: taxonomy as unknown as { categoryId: number; tagIds: number[] } } : {}),
   };
 }
 

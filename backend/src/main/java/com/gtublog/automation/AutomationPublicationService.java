@@ -40,6 +40,7 @@ public class AutomationPublicationService {
     private final SlugService slugService;
     private final Clock clock;
     private final PlatformMetricsService platformMetricsService;
+    private final AutomationTaxonomyService automationTaxonomyService;
 
     public AutomationPublicationService(
             AutomationTopicRepository automationTopicRepository,
@@ -51,7 +52,8 @@ public class AutomationPublicationService {
             AuditService auditService,
             SlugService slugService,
             Clock clock,
-            PlatformMetricsService platformMetricsService) {
+            PlatformMetricsService platformMetricsService,
+            AutomationTaxonomyService automationTaxonomyService) {
         this.automationTopicRepository = automationTopicRepository;
         this.sourceSnapshotRepository = sourceSnapshotRepository;
         this.postRepository = postRepository;
@@ -62,14 +64,27 @@ public class AutomationPublicationService {
         this.slugService = slugService;
         this.clock = clock;
         this.platformMetricsService = platformMetricsService;
+        this.automationTaxonomyService = automationTaxonomyService;
     }
 
     @Transactional
     public PublicationDecision processSubmission(
             GenerationJob job,
             AutomationRun run,
-            GenerationJobSubmitRequest request) {
+            GenerationJobSubmitRequest request,
+            GenerationJobClaimResponse.TaxonomyCatalog catalog) {
         run.requireActive(now());
+        if (!"automation-job-v3".equals(job.getSchemaVersion())) {
+            run.markHeld(AutomationHoldReason.TAXONOMY_SELECTION_MISSING, now());
+            recordDecision(run, "held", "taxonomy_missing_legacy");
+            return PublicationDecision.held(AutomationHoldReason.TAXONOMY_SELECTION_MISSING);
+        }
+        var taxonomyProblem = automationTaxonomyService.validateSelection(catalog, request.draft().taxonomy());
+        if (taxonomyProblem != null) {
+            run.markHeld(taxonomyProblem, now());
+            recordDecision(run, "held", "taxonomy_invalid");
+            return PublicationDecision.held(taxonomyProblem);
+        }
         var topic = automationTopicRepository.findById(run.getTopicId()).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
         var citedSnapshots = resolveCitedSnapshots(run.getId(), request.draft().citationSnapshotIds());
 
@@ -107,6 +122,7 @@ public class AutomationPublicationService {
                 request.draft().contentMarkdown(),
                 fingerprint,
                 citedSnapshots,
+                request.draft().taxonomy(),
                 RevisionSource.AUTOMATION,
                 "Automatically generated from verified source snapshots.");
         run.markSucceeded(now());
@@ -122,6 +138,8 @@ public class AutomationPublicationService {
                         "jobId", job.getId(),
                         "slug", post.getSlug(),
                         "citationCount", citedSnapshots.size(),
+                        "categoryId", request.draft().taxonomy().categoryId(),
+                        "tagIds", request.draft().taxonomy().tagIds(),
                         "sourceFingerprint", fingerprint));
         return PublicationDecision.published(post.getId(), post.getSlug());
     }
@@ -130,7 +148,15 @@ public class AutomationPublicationService {
     public AutomationRunOverridePublishResponse publishAdminOverride(
             GenerationJob job,
             AutomationRun run,
-            AutomationRunDetailResponse.GeneratedDraftResponse draft) {
+            AutomationRunDetailResponse.GeneratedDraftResponse draft,
+            GenerationJobClaimResponse.TaxonomyCatalog catalog) {
+        if (!"automation-job-v3".equals(job.getSchemaVersion())) {
+            throw new IllegalStateException(AutomationHoldReason.TAXONOMY_SELECTION_MISSING);
+        }
+        var taxonomyProblem = automationTaxonomyService.validateSelection(catalog, draft.taxonomy());
+        if (taxonomyProblem != null) {
+            throw new IllegalStateException(taxonomyProblem);
+        }
         var topic = automationTopicRepository.findById(run.getTopicId()).orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
         var citedSnapshots = resolveCitedSnapshots(run.getId(), draft.citationSnapshotIds());
         if (citedSnapshots.isEmpty() || citedSnapshots.stream().anyMatch(snapshot -> snapshot.getPolicyResult() != SourcePolicyResult.ALLOWED)) {
@@ -151,6 +177,7 @@ public class AutomationPublicationService {
                 draft.contentMarkdown(),
                 fingerprint,
                 citedSnapshots,
+                draft.taxonomy(),
                 RevisionSource.AUTOMATION,
                 "Published manually from a held automation draft.");
         auditService.record(
@@ -164,6 +191,8 @@ public class AutomationPublicationService {
                         "jobId", job.getId(),
                         "postId", post.getId(),
                         "slug", post.getSlug(),
+                        "categoryId", draft.taxonomy().categoryId(),
+                        "tagIds", draft.taxonomy().tagIds(),
                         "sourceFingerprint", fingerprint));
         return new AutomationRunOverridePublishResponse(run.getId(), post.getId(), post.getSlug());
     }
@@ -186,6 +215,7 @@ public class AutomationPublicationService {
             String contentMarkdown,
             String fingerprint,
             List<SourceSnapshot> citedSnapshots,
+            GenerationJobSubmitRequest.TaxonomySelection taxonomy,
             RevisionSource revisionSource,
             String revisionNote) {
         var slug = uniqueSlug(title);
@@ -196,6 +226,7 @@ public class AutomationPublicationService {
                 contentMarkdown,
                 sanitizeMarkdown(contentMarkdown),
                 fingerprint));
+        automationTaxonomyService.linkPost(post.getId(), taxonomy);
         post.publish(now());
         var revision = postRevisionRepository.save(PostRevision.create(
                 post.getId(),

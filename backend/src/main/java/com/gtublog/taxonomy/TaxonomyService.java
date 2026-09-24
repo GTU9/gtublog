@@ -38,7 +38,7 @@ public class TaxonomyService {
 
     @Transactional
     public TaxonomyResponse updateCategory(Long id, TaxonomyRequest request) {
-        var category = categoryRepository.findById(id).orElseThrow();
+        var category = categoryRepository.findByIdForUpdate(id).orElseThrow();
         var slug = uniqueCategorySlug(request.slug(), request.name(), id);
         category.update(slug, request.name(), request.description());
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.TAXONOMY, category.getId().toString(), "CATEGORY_UPDATED", Map.of("slug", slug));
@@ -47,7 +47,8 @@ public class TaxonomyService {
 
     @Transactional
     public void deleteCategory(Long id) {
-        categoryRepository.deleteById(id);
+        var category = categoryRepository.findByIdForUpdate(id).orElseThrow();
+        categoryRepository.delete(category);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.TAXONOMY, id.toString(), "CATEGORY_DELETED", Map.of());
     }
 
@@ -66,7 +67,7 @@ public class TaxonomyService {
 
     @Transactional
     public TaxonomyResponse updateTag(Long id, TaxonomyRequest request) {
-        var tag = tagRepository.findById(id).orElseThrow();
+        var tag = tagRepository.findByIdForUpdate(id).orElseThrow();
         var slug = uniqueTagSlug(request.slug(), request.name(), id);
         tag.update(slug, request.name(), request.description());
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.TAXONOMY, tag.getId().toString(), "TAG_UPDATED", Map.of("slug", slug));
@@ -75,7 +76,8 @@ public class TaxonomyService {
 
     @Transactional
     public void deleteTag(Long id) {
-        tagRepository.deleteById(id);
+        var tag = tagRepository.findByIdForUpdate(id).orElseThrow();
+        tagRepository.delete(tag);
         auditService.record(AuditActorType.ADMIN, "1", AuditTargetType.TAXONOMY, id.toString(), "TAG_DELETED", Map.of());
     }
 

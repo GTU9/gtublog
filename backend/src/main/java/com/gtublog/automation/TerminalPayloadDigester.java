@@ -41,6 +41,12 @@ class TerminalPayloadDigester {
             draft.put("citationSnapshotIds", request.draft().citationSnapshotIds() == null
                     ? List.of()
                     : request.draft().citationSnapshotIds().stream().sorted().toList());
+            if ("automation-job-v3".equals(request.schemaVersion())) {
+                var taxonomy = new LinkedHashMap<String, Object>();
+                taxonomy.put("categoryId", request.draft().taxonomy().categoryId());
+                taxonomy.put("tagIds", request.draft().taxonomy().tagIds().stream().sorted().toList());
+                draft.put("taxonomy", taxonomy);
+            }
             value.put("draft", draft);
         }
         value.put("failureReason", request.failureReason() == null ? null : normalize(request.failureReason()));

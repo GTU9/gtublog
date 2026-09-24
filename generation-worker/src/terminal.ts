@@ -13,6 +13,10 @@ export function canonicalTerminalPayload(request: Omit<GenerationSubmitRequest, 
         excerpt: normalize(request.draft.excerpt),
         contentMarkdown: normalize(request.draft.contentMarkdown),
         citationSnapshotIds: [...request.draft.citationSnapshotIds].sort((a, b) => a - b),
+        ...(request.schemaVersion === "automation-job-v3" ? { taxonomy: request.draft.taxonomy ? {
+          categoryId: request.draft.taxonomy.categoryId,
+          tagIds: [...request.draft.taxonomy.tagIds].sort((a, b) => a - b),
+        } : null } : {}),
       }
     : null;
   return JSON.stringify({

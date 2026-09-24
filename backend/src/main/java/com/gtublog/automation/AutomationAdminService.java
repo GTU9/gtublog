@@ -278,7 +278,8 @@ public class AutomationAdminService {
         }
         var job = generationJobRepository.findByRunIdForUpdate(runId)
                 .orElseThrow(() -> new NoSuchElementException("Generation job not found for the held automation run."));
-        var response = automationPublicationService.publishAdminOverride(job, run, draft);
+        var response = automationPublicationService.publishAdminOverride(
+                job, run, draft, generationJobService.catalogForJob(job));
         run.markOverridePublished(response.postId());
         return response;
     }
@@ -397,11 +398,22 @@ public class AutomationAdminService {
                                 citationIds.add(Long.parseLong(text));
                             }
                         }
+                        GenerationJobSubmitRequest.TaxonomySelection taxonomy = null;
+                        var taxonomyNode = payload.path("taxonomy");
+                        if (!taxonomyNode.isMissingNode() && !taxonomyNode.isNull()) {
+                            List<Long> tagIds = new ArrayList<>();
+                            for (var tagNode : taxonomyNode.withArray("tagIds")) {
+                                tagIds.add(tagNode.longValue());
+                            }
+                            taxonomy = new GenerationJobSubmitRequest.TaxonomySelection(
+                                    taxonomyNode.path("categoryId").longValue(), tagIds);
+                        }
                         return new AutomationRunDetailResponse.GeneratedDraftResponse(
                                 payload.path("title").asText(),
                                 payload.path("excerpt").asText(),
                                 payload.path("contentMarkdown").asText(),
-                                citationIds);
+                                citationIds,
+                                taxonomy);
                     } catch (Exception exception) {
                         throw new IllegalStateException("Could not deserialize the stored automation draft.", exception);
                     }
@@ -421,8 +433,12 @@ public class AutomationAdminService {
         if (run.getStatus() != AutomationRunStatus.HELD || run.getResolutionStatus() != null || draft == null) {
             return false;
         }
-        return AutomationHoldReason.AUTOMATIC_PUBLICATION_DISABLED.equals(run.getHoldReason())
-                || AutomationHoldReason.INSUFFICIENT_ORIGINS.equals(run.getHoldReason());
+        if (!(AutomationHoldReason.AUTOMATIC_PUBLICATION_DISABLED.equals(run.getHoldReason())
+                || AutomationHoldReason.INSUFFICIENT_ORIGINS.equals(run.getHoldReason()))) {
+            return false;
+        }
+        var job = generationJobRepository.findByRunId(run.getId()).orElse(null);
+        return job != null && generationJobService.selectionInJobCatalog(job, draft.taxonomy());
     }
 
     private String uniqueTopicSlug(String providedSlug, String fallbackName, Long currentId) {

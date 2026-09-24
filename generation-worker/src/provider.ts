@@ -6,7 +6,12 @@ export interface GenerationRequest {
   readonly schemaVersion: string;
   readonly snapshots: ReadonlyArray<GenerationSnapshot>;
   readonly prompt: string;
+  readonly taxonomyCatalog?: TaxonomyCatalog;
 }
+
+export interface TaxonomyTerm { readonly id: number; readonly slug: string; readonly name: string; }
+export interface TaxonomyCatalog { readonly categories: ReadonlyArray<TaxonomyTerm>; readonly tags: ReadonlyArray<TaxonomyTerm>; }
+export interface TaxonomySelection { readonly categoryId: number; readonly tagIds: ReadonlyArray<number>; }
 
 export interface GenerationSnapshot {
   readonly snapshotId: number;
@@ -25,6 +30,7 @@ export interface GenerationResult {
   readonly contentMarkdown: string;
   readonly citationSnapshotIds: ReadonlyArray<number>;
   readonly provider: string;
+  readonly taxonomy?: TaxonomySelection;
 }
 
 export interface GenerationProvider {
