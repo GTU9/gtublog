@@ -107,6 +107,7 @@ class GenerationTaxonomyIntegrationTests {
     void resetState() {
         automationScheduleSynchronizer.clearAutomationSchedules();
         WIREMOCK.resetAll();
+        jdbcTemplate.update("DELETE FROM automation_publication_claim");
         jdbcTemplate.update("DELETE FROM post_revision_source_snapshot");
         jdbcTemplate.update("DELETE FROM publication_outbox_event");
         jdbcTemplate.update("DELETE FROM post_revision");

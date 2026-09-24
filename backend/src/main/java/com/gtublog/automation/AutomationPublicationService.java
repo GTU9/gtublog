@@ -49,6 +49,11 @@ public class AutomationPublicationService {
     private final GeneratedMarkdownRenderer generatedMarkdownRenderer;
     private final AutomationPublicationDecisionRepository automationPublicationDecisionRepository;
     private final AutomationSourceRelationDiagnosticRepository automationSourceRelationDiagnosticRepository;
+    private final AutomationPublicationClaimRepository automationPublicationClaimRepository;
+    private final AutomationSourceRepository automationSourceRepository;
+    private final AutomationOriginApprovalRepository automationOriginApprovalRepository;
+    private final AutomationOriginPairApprovalRepository automationOriginPairApprovalRepository;
+    private final AutomationRunOriginPairRepository automationRunOriginPairRepository;
     private final ObjectMapper objectMapper;
     private final StructuredEvidenceShadowVerifier structuredEvidenceShadowVerifier;
 
@@ -67,6 +72,11 @@ public class AutomationPublicationService {
             GeneratedMarkdownRenderer generatedMarkdownRenderer,
             AutomationPublicationDecisionRepository automationPublicationDecisionRepository,
             AutomationSourceRelationDiagnosticRepository automationSourceRelationDiagnosticRepository,
+            AutomationPublicationClaimRepository automationPublicationClaimRepository,
+            AutomationSourceRepository automationSourceRepository,
+            AutomationOriginApprovalRepository automationOriginApprovalRepository,
+            AutomationOriginPairApprovalRepository automationOriginPairApprovalRepository,
+            AutomationRunOriginPairRepository automationRunOriginPairRepository,
             ObjectMapper objectMapper,
             StructuredEvidenceShadowVerifier structuredEvidenceShadowVerifier) {
         this.automationTopicRepository = automationTopicRepository;
@@ -83,6 +93,11 @@ public class AutomationPublicationService {
         this.generatedMarkdownRenderer = generatedMarkdownRenderer;
         this.automationPublicationDecisionRepository = automationPublicationDecisionRepository;
         this.automationSourceRelationDiagnosticRepository = automationSourceRelationDiagnosticRepository;
+        this.automationPublicationClaimRepository = automationPublicationClaimRepository;
+        this.automationSourceRepository = automationSourceRepository;
+        this.automationOriginApprovalRepository = automationOriginApprovalRepository;
+        this.automationOriginPairApprovalRepository = automationOriginPairApprovalRepository;
+        this.automationRunOriginPairRepository = automationRunOriginPairRepository;
         this.objectMapper = objectMapper;
         this.structuredEvidenceShadowVerifier = structuredEvidenceShadowVerifier;
     }
@@ -158,7 +173,9 @@ public class AutomationPublicationService {
             AutomationRun run,
             GenerationJobSubmitRequest request,
             GenerationJobClaimResponse.TaxonomyCatalog catalog) {
-        var taxonomyProblem = automationTaxonomyService.validateSelection(catalog, request.taxonomy());
+        var topic = automationTopicRepository.findByIdForUpdate(run.getTopicId())
+                .orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
+        var taxonomyProblem = automationTaxonomyService.selectionProblem(catalog, request.taxonomy());
         if (taxonomyProblem != null) {
             run.markHeld(taxonomyProblem, now());
             persistStructuredEvidenceDecision(run, "TAXONOMY_INVALID", false, List.of(), taxonomyProblem);
@@ -166,20 +183,105 @@ public class AutomationPublicationService {
             return PublicationDecision.held(taxonomyProblem);
         }
         var verification = structuredEvidenceShadowVerifier.verify(run.getId(), request.observations());
-        run.markHeld(AutomationHoldReason.INSUFFICIENT_ORIGINS, now());
-        var detailReason = verification.accepted()
-                ? "STRUCTURED_EVIDENCE_SHADOW_ACCEPTED"
-                : "STRUCTURED_EVIDENCE_SHADOW_REJECTED";
+        if (!verification.accepted() || request.observations() == null || request.observations().size() != 1) {
+            var detailReason = request.observations() != null && request.observations().size() != 1
+                    ? "STRUCTURED_SOURCE_MENTION_COUNT_UNSUPPORTED"
+                    : "STRUCTURED_EVIDENCE_REJECTED";
+            run.markHeld(AutomationHoldReason.INSUFFICIENT_ORIGINS, now());
+            persistStructuredEvidenceDecision(
+                    run,
+                    detailReason,
+                    verification.accepted(),
+                    verification.diagnosticPayload(),
+                    AutomationHoldReason.INSUFFICIENT_ORIGINS);
+            recordDecision(run, "held", detailReason.toLowerCase(java.util.Locale.ROOT));
+            return PublicationDecision.held(AutomationHoldReason.INSUFFICIENT_ORIGINS);
+        }
+
+        var observation = request.observations().getFirst();
+        var citedSnapshots = resolveCitedSnapshots(run.getId(), observation.citationSnapshotIds());
+        var relationSnapshots = sameRunAllowedSnapshots(run.getId());
+        var relations = sourceRelations(run.getId(), relationSnapshots);
+        var currentProblem = currentStructuredEvidenceProblem(topic, run, citedSnapshots, relations);
+        if (currentProblem != null) {
+            run.markHeld(currentProblem.holdReason(), now());
+            persistStructuredEvidenceDecision(
+                    run,
+                    currentProblem.detailReason(),
+                    true,
+                    structuredDiagnostics(verification, citedSnapshots, relationSnapshots, relations),
+                    currentProblem.holdReason(),
+                    "held",
+                    relations);
+            recordDecision(run, "held", currentProblem.detailReason().toLowerCase(java.util.Locale.ROOT));
+            return PublicationDecision.held(currentProblem.holdReason());
+        }
+        taxonomyProblem = automationTaxonomyService.validateSelection(catalog, request.taxonomy());
+        if (taxonomyProblem != null) {
+            run.markHeld(taxonomyProblem, now());
+            persistStructuredEvidenceDecision(
+                    run,
+                    "TAXONOMY_INVALID",
+                    true,
+                    structuredDiagnostics(verification, citedSnapshots, relationSnapshots, relations),
+                    taxonomyProblem,
+                    "held",
+                    relations);
+            recordDecision(run, "held", "structured_taxonomy_invalid");
+            return PublicationDecision.held(taxonomyProblem);
+        }
+
+        var markdown = structuredSourceMentionMarkdown(observation.literal());
+        var fingerprint = fingerprint(topic.getId(), markdown, citedSnapshots);
+        var canonicalUrls = canonicalUrls(citedSnapshots);
+        if (!automationPublicationClaimRepository.acquire(run.getId(), fingerprint, canonicalUrls)) {
+            run.markHeld(AutomationHoldReason.DUPLICATE_PUBLICATION, now());
+            persistStructuredEvidenceDecision(
+                    run,
+                    "DUPLICATE_PUBLICATION_CLAIM",
+                    true,
+                    structuredDiagnostics(verification, citedSnapshots, relationSnapshots, relations),
+                    AutomationHoldReason.DUPLICATE_PUBLICATION,
+                    "held",
+                    relations);
+            recordDecision(run, "held", "duplicate_publication_claim");
+            return PublicationDecision.held(AutomationHoldReason.DUPLICATE_PUBLICATION);
+        }
+
+        var post = publishDraft(
+                structuredSourceMentionTitle(),
+                structuredSourceMentionExcerpt(),
+                markdown,
+                fingerprint,
+                citedSnapshots,
+                request.taxonomy(),
+                RevisionSource.AUTOMATION,
+                "Published automatically from verified structured source-mention evidence.",
+                "automation-observation-run-" + run.getId());
+        automationPublicationClaimRepository.attachPost(run.getId(), post.getId());
+        run.markSucceeded(now());
         persistStructuredEvidenceDecision(
                 run,
-                detailReason,
-                verification.accepted(),
-                verification.diagnosticPayload(),
-                AutomationHoldReason.INSUFFICIENT_ORIGINS);
-        recordDecision(run, "held", verification.accepted()
-                ? "structured_evidence_shadow_accepted"
-                : "structured_evidence_shadow_rejected");
-        return PublicationDecision.held(AutomationHoldReason.INSUFFICIENT_ORIGINS);
+                "STRUCTURED_SOURCE_MENTION_PUBLISHED",
+                true,
+                structuredDiagnostics(verification, citedSnapshots, relationSnapshots, relations),
+                null,
+                "published",
+                relations);
+        recordDecision(run, "published", "structured_source_mention");
+        auditService.record(
+                AuditActorType.WORKER,
+                "automation-publication",
+                AuditTargetType.POST,
+                post.getId().toString(),
+                "STRUCTURED_SOURCE_MENTION_PUBLISHED",
+                Map.of(
+                        "runId", run.getId(),
+                        "postId", post.getId(),
+                        "slug", post.getSlug(),
+                        "sourceFingerprint", fingerprint,
+                        "citationSnapshotIds", citedSnapshots.stream().map(SourceSnapshot::getId).toList()));
+        return PublicationDecision.published(post.getId(), post.getSlug());
     }
 
     @Transactional
@@ -209,6 +311,9 @@ public class AutomationPublicationService {
                 || (!canonicalUrls.isEmpty() && sourceSnapshotRepository.countPublishedCitationsForCanonicalUrls(canonicalUrls) > 0)) {
             throw new IllegalStateException(AutomationHoldReason.DUPLICATE_PUBLICATION);
         }
+        if (!automationPublicationClaimRepository.acquire(run.getId(), fingerprint, canonicalUrls)) {
+            throw new IllegalStateException(AutomationHoldReason.DUPLICATE_PUBLICATION);
+        }
         var post = publishDraft(
                 draft.title(),
                 draft.excerpt(),
@@ -217,7 +322,9 @@ public class AutomationPublicationService {
                 citedSnapshots,
                 draft.taxonomy(),
                 RevisionSource.AUTOMATION,
-                "Published manually from a held automation draft.");
+                "Published manually from a held automation draft.",
+                null);
+        automationPublicationClaimRepository.attachPost(run.getId(), post.getId());
         auditService.record(
                 AuditActorType.ADMIN,
                 "1",
@@ -257,7 +364,7 @@ public class AutomationPublicationService {
         var relations = new ArrayList<SourceRelation>();
         for (int leftIndex = 0; leftIndex < snapshots.size(); leftIndex++) {
             for (int rightIndex = leftIndex + 1; rightIndex < snapshots.size(); rightIndex++) {
-                relation(runId, snapshots.get(leftIndex), snapshots.get(rightIndex)).ifPresent(relations::add);
+                relations.addAll(relations(runId, snapshots.get(leftIndex), snapshots.get(rightIndex)));
             }
         }
         return relations;
@@ -281,24 +388,25 @@ public class AutomationPublicationService {
                 && connectedIds.contains(relation.leftSnapshotId()));
     }
 
-    private java.util.Optional<SourceRelation> relation(Long runId, SourceSnapshot left, SourceSnapshot right) {
+    private List<SourceRelation> relations(Long runId, SourceSnapshot left, SourceSnapshot right) {
+        var relations = new ArrayList<SourceRelation>();
         if (sameNonBlank(left.getCanonicalUrl(), right.getCanonicalUrl())) {
-            return java.util.Optional.of(new SourceRelation(runId, left.getId(), right.getId(), "SHARED_UPSTREAM", left.getCanonicalUrl()));
+            relations.add(new SourceRelation(runId, left.getId(), right.getId(), "SHARED_UPSTREAM", left.getCanonicalUrl()));
         }
         if (sameNonBlank(left.getBodyTextHash(), right.getBodyTextHash())) {
-            return java.util.Optional.of(new SourceRelation(runId, left.getId(), right.getId(), "SHARED_UPSTREAM", left.getBodyTextHash()));
+            relations.add(new SourceRelation(runId, left.getId(), right.getId(), "SHARED_UPSTREAM", left.getBodyTextHash()));
         }
         var sharedUpstream = sharedUpstream(left, right);
         if (sharedUpstream != null) {
-            return java.util.Optional.of(new SourceRelation(runId, left.getId(), right.getId(), "SHARED_UPSTREAM", sharedUpstream));
+            relations.add(new SourceRelation(runId, left.getId(), right.getId(), "SHARED_UPSTREAM", sharedUpstream));
         }
         if (left.getAutomationRunId() != null && sameNonBlank(left.getOriginHost(), right.getOriginHost())) {
-            return java.util.Optional.of(new SourceRelation(runId, left.getId(), right.getId(), "SAME_HOST", left.getOriginHost()));
+            relations.add(new SourceRelation(runId, left.getId(), right.getId(), "SAME_HOST", left.getOriginHost()));
         }
         if (sameConfiguredSource(left, right)) {
-            return java.util.Optional.of(new SourceRelation(runId, left.getId(), right.getId(), "SAME_CONFIGURED_SOURCE", null));
+            relations.add(new SourceRelation(runId, left.getId(), right.getId(), "SAME_CONFIGURED_SOURCE", null));
         }
-        return java.util.Optional.empty();
+        return relations;
     }
 
     private String sharedUpstream(SourceSnapshot left, SourceSnapshot right) {
@@ -348,6 +456,160 @@ public class AutomationPublicationService {
         return left != null && !left.isBlank() && left.equals(right);
     }
 
+    private StructuredPublicationProblem currentStructuredEvidenceProblem(
+            AutomationTopic topic,
+            AutomationRun run,
+            List<SourceSnapshot> citedSnapshots,
+            List<SourceRelation> relations) {
+        if (!topic.isPublicationEnabled()) {
+            return new StructuredPublicationProblem(
+                    AutomationHoldReason.AUTOMATIC_PUBLICATION_DISABLED,
+                    "PUBLICATION_DISABLED");
+        }
+        if (citedSnapshots.size() != 2 || citedSnapshots.stream().anyMatch(snapshot -> snapshot.getPolicyResult() != SourcePolicyResult.ALLOWED)) {
+            return new StructuredPublicationProblem(AutomationHoldReason.SOURCE_BLOCKED, "SOURCE_BLOCKED");
+        }
+        if (citedSnapshots.stream().anyMatch(snapshot -> snapshot.getAutomationSourceId() == null
+                || snapshot.getOriginApprovalId() == null
+                || snapshot.getOriginApprovalRevision() == null
+                || snapshot.getOriginGroupId() == null
+                || snapshot.getOriginHost() == null
+                || snapshot.getOriginHost().isBlank())) {
+            return new StructuredPublicationProblem(AutomationHoldReason.INSUFFICIENT_ORIGINS, "ORIGIN_APPROVAL_CAPTURE_MISSING");
+        }
+        if (citedSnapshots.stream().map(SourceSnapshot::getAutomationSourceId).distinct().count() != 2
+                || citedSnapshots.stream().map(SourceSnapshot::getOriginHost).distinct().count() != 2
+                || citedSnapshots.stream().map(SourceSnapshot::getOriginGroupId).distinct().count() != 2) {
+            return new StructuredPublicationProblem(AutomationHoldReason.INSUFFICIENT_ORIGINS, "ORIGIN_INDEPENDENCE_MISSING");
+        }
+
+        var lockedSources = citedSnapshots.stream()
+                .map(SourceSnapshot::getAutomationSourceId)
+                .distinct()
+                .sorted()
+                .map(sourceId -> automationSourceRepository.findLockedById(sourceId).orElse(null))
+                .toList();
+        if (lockedSources.stream().anyMatch(source -> source == null || !source.isEnabled())) {
+            return new StructuredPublicationProblem(AutomationHoldReason.SOURCE_BLOCKED, "SOURCE_DISABLED_OR_MISSING");
+        }
+        var sourcesById = lockedSources.stream().collect(Collectors.toMap(AutomationSource::getId, source -> source));
+        for (var snapshot : citedSnapshots) {
+            var source = sourcesById.get(snapshot.getAutomationSourceId());
+            var approval = automationOriginApprovalRepository.findByIdForUpdate(snapshot.getOriginApprovalId()).orElse(null);
+            if (approval == null
+                    || !approval.isActive()
+                    || !approval.getSourceId().equals(source.getId())
+                    || !approval.getOriginHost().equals(snapshot.getOriginHost())
+                    || !approval.getGroupId().equals(snapshot.getOriginGroupId())
+                    || approval.getRevision() != snapshot.getOriginApprovalRevision()
+                    || !approval.getApprovedSourceUrl().equals(source.getSourceUrl())
+                    || approval.getApprovedSourceType() != source.getSourceType()) {
+                return new StructuredPublicationProblem(AutomationHoldReason.INSUFFICIENT_ORIGINS, "ORIGIN_APPROVAL_NOT_CURRENT");
+            }
+        }
+
+        var groupIds = citedSnapshots.stream().map(SourceSnapshot::getOriginGroupId).sorted().toList();
+        var capturedPair = automationRunOriginPairRepository.findAllByRunIdOrderByIdAsc(run.getId()).stream()
+                .filter(pair -> pair.getGroupLowId().equals(groupIds.get(0)) && pair.getGroupHighId().equals(groupIds.get(1)))
+                .findFirst()
+                .orElse(null);
+        if (capturedPair == null) {
+            return new StructuredPublicationProblem(AutomationHoldReason.INSUFFICIENT_ORIGINS, "ORIGIN_PAIR_CAPTURE_MISSING");
+        }
+        var pairApproval = automationOriginPairApprovalRepository.findByIdForUpdate(capturedPair.getPairApprovalId()).orElse(null);
+        if (pairApproval == null
+                || !pairApproval.isActive()
+                || !pairApproval.getTopicId().equals(run.getTopicId())
+                || !pairApproval.getGroupLowId().equals(capturedPair.getGroupLowId())
+                || !pairApproval.getGroupHighId().equals(capturedPair.getGroupHighId())
+                || pairApproval.getRevision() != capturedPair.getApprovalRevision()) {
+            return new StructuredPublicationProblem(AutomationHoldReason.INSUFFICIENT_ORIGINS, "ORIGIN_PAIR_APPROVAL_NOT_CURRENT");
+        }
+        if (hasRelevantDependency(citedSnapshots, relations)) {
+            return new StructuredPublicationProblem(AutomationHoldReason.INSUFFICIENT_ORIGINS, "RELATED_ORIGIN_COMPONENT");
+        }
+        return null;
+    }
+
+    private boolean hasRelevantDependency(List<SourceSnapshot> citedSnapshots, List<SourceRelation> relations) {
+        var connectedIds = citedSnapshots.stream().map(SourceSnapshot::getId).collect(Collectors.toCollection(HashSet::new));
+        int previousSize;
+        do {
+            previousSize = connectedIds.size();
+            for (var relation : relations) {
+                if (connectedIds.contains(relation.leftSnapshotId()) || connectedIds.contains(relation.rightSnapshotId())) {
+                    connectedIds.add(relation.leftSnapshotId());
+                    connectedIds.add(relation.rightSnapshotId());
+                }
+            }
+        } while (connectedIds.size() != previousSize);
+        return relations.stream().anyMatch(relation -> connectedIds.contains(relation.leftSnapshotId())
+                && connectedIds.contains(relation.rightSnapshotId())
+                && ("SHARED_UPSTREAM".equals(relation.relationType())
+                || "SAME_HOST".equals(relation.relationType())
+                || "SAME_CONFIGURED_SOURCE".equals(relation.relationType())));
+    }
+
+    private List<String> canonicalUrls(List<SourceSnapshot> snapshots) {
+        return snapshots.stream()
+                .map(SourceSnapshot::getCanonicalUrl)
+                .filter(url -> url != null && !url.isBlank())
+                .distinct()
+                .toList();
+    }
+
+    private String structuredSourceMentionTitle() {
+        return "두 출처에서 같은 문구가 관찰되었습니다";
+    }
+
+    private String structuredSourceMentionExcerpt() {
+        return "서로 다른 두 출처의 저장 기사에서 같은 문구가 관찰된 기록입니다.";
+    }
+
+    private String structuredSourceMentionMarkdown(String literal) {
+        return """
+                두 출처의 기사에서 다음 문구가 관찰되었습니다.
+
+                > %s
+
+                이 글은 저장된 두 기사에 같은 문구가 있었다는 관찰 기록입니다. 문구의 사실 여부는 검증하지 않습니다.
+                """.formatted(markdownEscape(TerminalPayloadDigester.normalizeEvidenceText(literal))).strip();
+    }
+
+    private String markdownEscape(String value) {
+        var escaped = new StringBuilder(value.length());
+        for (int index = 0; index < value.length(); index++) {
+            var character = value.charAt(index);
+            if ("\\`*_{}[]()#+-.!|".indexOf(character) >= 0) {
+                escaped.append('\\');
+            }
+            escaped.append(character);
+        }
+        return escaped.toString();
+    }
+
+    private List<Map<String, Object>> structuredDiagnostics(
+            StructuredEvidenceShadowVerifier.VerificationResult verification,
+            List<SourceSnapshot> citedSnapshots,
+            List<SourceSnapshot> relationSnapshots,
+            List<SourceRelation> relations) {
+        var diagnostics = new ArrayList<>(verification.diagnosticPayload());
+        var payload = new LinkedHashMap<String, Object>();
+        payload.put("accepted", true);
+        payload.put("citedSnapshotIds", citedSnapshots.stream().map(SourceSnapshot::getId).toList());
+        payload.put("evaluatedSnapshotIds", relationSnapshots.stream().map(SourceSnapshot::getId).toList());
+        payload.put("relations", relations.stream().map(relation -> {
+            var relationPayload = new LinkedHashMap<String, Object>();
+            relationPayload.put("leftSnapshotId", relation.leftSnapshotId());
+            relationPayload.put("rightSnapshotId", relation.rightSnapshotId());
+            relationPayload.put("relationType", relation.relationType());
+            relationPayload.put("evidenceValue", relation.evidenceValue());
+            return relationPayload;
+        }).toList());
+        diagnostics.add(payload);
+        return diagnostics;
+    }
+
     private void persistPublicationDecision(
             AutomationRun run,
             List<SourceSnapshot> citedSnapshots,
@@ -391,14 +653,43 @@ public class AutomationPublicationService {
             boolean accepted,
             List<Map<String, Object>> diagnostics,
             String holdReason) {
+        persistStructuredEvidenceDecision(run, detailReason, accepted, diagnostics, holdReason, "held");
+    }
+
+    private void persistStructuredEvidenceDecision(
+            AutomationRun run,
+            String detailReason,
+            boolean accepted,
+            List<Map<String, Object>> diagnostics,
+            String holdReason,
+            String outcome) {
+        persistStructuredEvidenceDecision(run, detailReason, accepted, diagnostics, holdReason, outcome, List.of());
+    }
+
+    private void persistStructuredEvidenceDecision(
+            AutomationRun run,
+            String detailReason,
+            boolean accepted,
+            List<Map<String, Object>> diagnostics,
+            String holdReason,
+            String outcome,
+            List<SourceRelation> relations) {
         automationPublicationDecisionRepository.deleteByRunId(run.getId());
         automationSourceRelationDiagnosticRepository.deleteByRunId(run.getId());
+        automationSourceRelationDiagnosticRepository.saveAll(relations.stream()
+                .map(relation -> AutomationSourceRelationDiagnostic.record(
+                        relation.runId(),
+                        relation.leftSnapshotId(),
+                        relation.rightSnapshotId(),
+                        relation.relationType(),
+                        relation.evidenceValue()))
+                .toList());
         automationPublicationDecisionRepository.save(AutomationPublicationDecision.record(
                 run.getId(),
-                "held",
+                outcome,
                 holdReason,
                 detailReason,
-                structuredEvidenceDecisionJson(run, detailReason, accepted, diagnostics, holdReason)));
+                structuredEvidenceDecisionJson(run, detailReason, accepted, diagnostics, holdReason, outcome)));
     }
 
     private String structuredEvidenceDecisionJson(
@@ -406,10 +697,11 @@ public class AutomationPublicationService {
             String detailReason,
             boolean accepted,
             List<Map<String, Object>> diagnostics,
-            String holdReason) {
+            String holdReason,
+            String outcome) {
         var payload = new LinkedHashMap<String, Object>();
         payload.put("runId", run.getId());
-        payload.put("outcome", "held");
+        payload.put("outcome", outcome);
         payload.put("holdReason", holdReason);
         payload.put("detailReason", detailReason);
         payload.put("accepted", accepted);
@@ -459,8 +751,9 @@ public class AutomationPublicationService {
             List<SourceSnapshot> citedSnapshots,
             GenerationJobSubmitRequest.TaxonomySelection taxonomy,
             RevisionSource revisionSource,
-            String revisionNote) {
-        var slug = uniqueSlug(title);
+            String revisionNote,
+            String fixedSlug) {
+        var slug = fixedSlug == null || fixedSlug.isBlank() ? uniqueSlug(title) : fixedSlug;
         var post = postRepository.save(Post.draft(
                 slug,
                 title,
@@ -535,5 +828,8 @@ public class AutomationPublicationService {
             Long rightSnapshotId,
             String relationType,
             String evidenceValue) {
+    }
+
+    private record StructuredPublicationProblem(String holdReason, String detailReason) {
     }
 }

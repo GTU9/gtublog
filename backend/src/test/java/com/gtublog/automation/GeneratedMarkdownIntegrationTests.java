@@ -134,6 +134,7 @@ class GeneratedMarkdownIntegrationTests {
     void resetState() {
         automationScheduleSynchronizer.clearAutomationSchedules();
         WIREMOCK.resetAll();
+        jdbcTemplate.update("DELETE FROM automation_publication_claim");
         for (String table : new String[] {
                 "post_view_counter", "post_revision_source_snapshot", "publication_outbox_event", "post_revision", "post_tag",
                 "post_category", "post", "source_snapshot", "generation_job", "automation_run",

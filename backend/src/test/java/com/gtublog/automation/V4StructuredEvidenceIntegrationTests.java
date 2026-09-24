@@ -3,6 +3,7 @@ package com.gtublog.automation;
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -10,6 +11,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.core.Options;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,6 +22,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Callable;
+import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.flywaydb.core.Flyway;
@@ -50,7 +54,8 @@ import tools.jackson.databind.ObjectMapper;
 @Tag("docker")
 @SpringBootTest(properties = {
         "spring.quartz.auto-startup=false",
-        "app.automation.worker.schema-version=automation-job-v4"
+        "app.automation.worker.schema-version=automation-job-v4",
+        "app.automation.collection.allowed-private-hosts=localhost,127.0.0.1,127.0.0.2"
 })
 class V4StructuredEvidenceIntegrationTests {
 
@@ -98,6 +103,8 @@ class V4StructuredEvidenceIntegrationTests {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private AutomationAdminService automationAdminService;
     @Autowired private AutomationScheduleSynchronizer automationScheduleSynchronizer;
+    @Autowired private OriginApprovalAdminService originApprovalAdminService;
+    @Autowired private OriginPairAdminService originPairAdminService;
     @Autowired private GenerationJobRepository generationJobRepository;
 
     private MockMvc mockMvc;
@@ -117,10 +124,13 @@ class V4StructuredEvidenceIntegrationTests {
         deleteIfPresent("automation_v4_observation_diagnostic");
         deleteIfPresent("automation_publication_decision");
         deleteIfPresent("automation_source_relation_diagnostic");
+        deleteIfPresent("automation_publication_claim");
+        deleteIfPresent("automation_run_origin_pair");
         for (String table : new String[] {
                 "post_view_counter", "post_revision_source_snapshot", "publication_outbox_event", "post_revision",
                 "post_tag", "post_category", "post", "source_snapshot", "generation_job", "automation_run",
-                "automation_schedule", "automation_source", "automation_topic", "tag", "category", "audit_entry"
+                "automation_schedule", "automation_origin_pair_approval", "automation_origin_approval",
+                "automation_origin_group", "automation_source", "automation_topic", "tag", "category", "audit_entry"
         }) {
             jdbcTemplate.update("DELETE FROM " + table);
         }
@@ -173,24 +183,15 @@ class V4StructuredEvidenceIntegrationTests {
     }
 
     @Test
-    void verifiedV4ObservationIsHeldWithoutPostRevisionOrOutbox() throws Exception {
-        var job = seedVerifiedV4Job("verified-held");
+    void verifiedApprovedV4ObservationPublishesObservationCardAtomically() throws Exception {
+        var job = seedApprovedVerifiedV4Job("verified-published", LITERAL);
         var claim = claim("worker-v4-success");
         var snapshotIds = claimSnapshotIds(claim);
 
         submit(job.getId(), observationBody("worker-v4-success", LITERAL, snapshotIds));
 
-        assertThat(jdbcTemplate.queryForObject(
-                "SELECT job_status FROM generation_job WHERE id = ?",
-                String.class,
-                job.getId())).isEqualTo("SUBMITTED");
-        assertThat(jdbcTemplate.queryForObject(
-                "SELECT status FROM automation_run WHERE id = ?",
-                String.class,
-                job.getRunId())).isEqualTo("HELD");
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isZero();
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post_revision", Integer.class)).isZero();
-        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class)).isZero();
+        var post = assertPublishedObservationCard(job, LITERAL);
+        assertThat(post.get("slug")).isEqualTo("automation-observation-run-" + job.getRunId());
 
         var storedPayload = jdbcTemplate.queryForObject(
                 "SELECT result_payload_json FROM generation_job WHERE id = ?",
@@ -198,6 +199,171 @@ class V4StructuredEvidenceIntegrationTests {
                 job.getId());
         assertThat(storedPayload).contains("\"observations\"");
         assertThat(storedPayload).doesNotContain("contentMarkdown").doesNotContain("\"draft\"");
+    }
+
+    @Test
+    void hostileMarkdownLiteralPublishesOnlyAsEscapedObservationText() throws Exception {
+        var hostileLiteral = "[breaking](javascript:alert(1)) ![pixel](https://evil.example/pixel.png) `code` *bold*";
+        var job = seedApprovedVerifiedV4Job("hostile-markdown", hostileLiteral);
+        var claim = claim("worker-v4-hostile");
+
+        submit(job.getId(), observationBody("worker-v4-hostile", hostileLiteral, claimSnapshotIds(claim)));
+
+        var post = assertPublishedObservationCard(job, hostileLiteral);
+        var contentMarkdown = (String) post.get("content_markdown");
+        var contentHtml = (String) post.get("content_html");
+        assertThat(contentMarkdown).contains("\\[breaking\\]").contains("\\!\\[pixel\\]");
+        assertThat(contentHtml)
+                .contains("[breaking](javascript:alert(1))")
+                .doesNotContain("<a ")
+                .doesNotContain("<img");
+    }
+
+    @Test
+    void holdsApprovedV4ObservationWhenCurrentSourceWasDisabledAfterCollection() throws Exception {
+        var job = seedApprovedVerifiedV4Job("disabled-source-after-collection", LITERAL);
+        var claim = claim("worker-v4-disabled-source");
+        var firstSourceId = jdbcTemplate.queryForObject(
+                "SELECT automation_source_id FROM source_snapshot WHERE automation_run_id = ? ORDER BY id LIMIT 1",
+                Long.class,
+                job.getRunId());
+        jdbcTemplate.update("UPDATE automation_source SET enabled = FALSE WHERE id = ?", firstSourceId);
+
+        submit(job.getId(), observationBody("worker-v4-disabled-source", LITERAL, claimSnapshotIds(claim)));
+
+        assertHeldWithoutPublication(job);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT hold_reason FROM automation_run WHERE id = ?",
+                String.class,
+                job.getRunId())).isEqualTo(AutomationHoldReason.SOURCE_BLOCKED);
+    }
+
+    @Test
+    void holdsApprovedV4ObservationWhenCapturedPairApprovalWasRevokedAfterCollection() throws Exception {
+        var job = seedApprovedVerifiedV4Job("revoked-pair-after-collection", LITERAL);
+        var claim = claim("worker-v4-revoked-pair");
+        jdbcTemplate.update(
+                """
+                UPDATE automation_origin_pair_approval
+                SET active = FALSE, revision = revision + 1, revoked_at = UTC_TIMESTAMP(6),
+                    revocation_rationale = 'Pair review expired.'
+                WHERE topic_id = (SELECT topic_id FROM automation_run WHERE id = ?)
+                """,
+                job.getRunId());
+
+        submit(job.getId(), observationBody("worker-v4-revoked-pair", LITERAL, claimSnapshotIds(claim)));
+
+        assertHeldWithoutPublication(job);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("structuredLineageDependencyCases")
+    void holdsApprovedV4ObservationWhenCitedSnapshotsAreNotIndependent(
+            String name,
+            Consumer<V4StructuredEvidenceIntegrationTests> arrange,
+            String detailReason) throws Exception {
+        var job = seedApprovedVerifiedV4Job(name, LITERAL);
+        arrange.accept(this);
+        var claim = claim("worker-v4-" + name);
+
+        submit(job.getId(), observationBody("worker-v4-" + name, LITERAL, claimSnapshotIds(claim)));
+
+        assertHeldWithoutPublication(job);
+        assertDecisionDetail(job.getRunId(), detailReason);
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("currentOriginApprovalCases")
+    void holdsApprovedV4ObservationWhenCapturedOriginApprovalIsNoLongerCurrent(
+            String name,
+            Consumer<V4StructuredEvidenceIntegrationTests> arrange) throws Exception {
+        var job = seedApprovedVerifiedV4Job(name, LITERAL);
+        arrange.accept(this);
+        var claim = claim("worker-v4-" + name);
+
+        submit(job.getId(), observationBody("worker-v4-" + name, LITERAL, claimSnapshotIds(claim)));
+
+        assertHeldWithoutPublication(job);
+        assertDecisionDetail(job.getRunId(), "ORIGIN_APPROVAL_NOT_CURRENT");
+    }
+
+    @Test
+    void concurrentApprovedV4SubmissionsWithSameCanonicalUrlsPublishOnlyOneObservationCard() throws Exception {
+        var firstJob = seedApprovedVerifiedV4Job(
+                "canonical-race-first",
+                LITERAL,
+                "https://canonical-race.example/source-a",
+                "https://canonical-race.example/source-b");
+        var firstClaim = claim("worker-v4-race-first");
+        var firstBody = observationBody("worker-v4-race-first", LITERAL, claimSnapshotIds(firstClaim));
+        var secondJob = seedApprovedVerifiedV4Job(
+                "canonical-race-second",
+                LITERAL,
+                "https://canonical-race.example/source-a",
+                "https://canonical-race.example/source-b");
+        var secondClaim = claim("worker-v4-race-second");
+        var secondBody = observationBody("worker-v4-race-second", LITERAL, claimSnapshotIds(secondClaim));
+
+        Callable<Integer> firstSubmit = () -> submit(firstJob.getId(), firstBody).getResponse().getStatus();
+        Callable<Integer> secondSubmit = () -> submit(secondJob.getId(), secondBody).getResponse().getStatus();
+        var executor = Executors.newFixedThreadPool(2);
+        try {
+            for (var result : executor.invokeAll(List.of(firstSubmit, secondSubmit))) {
+                assertThat(result.get()).isEqualTo(202);
+            }
+        } finally {
+            executor.shutdownNow();
+        }
+
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT status FROM automation_run WHERE id IN (?, ?) ORDER BY id",
+                String.class,
+                firstJob.getRunId(),
+                secondJob.getRunId())).containsExactlyInAnyOrder("SUCCEEDED", "HELD");
+        assertThat(jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM automation_publication_decision
+                WHERE run_id IN (?, ?) AND outcome = 'published'
+                """,
+                Integer.class,
+                firstJob.getRunId(),
+                secondJob.getRunId())).isEqualTo(1);
+    }
+
+    @Test
+    void v3ManualOverrideCannotReuseCanonicalClaimPublishedByV4Observation() throws Exception {
+        var firstJob = seedApprovedVerifiedV4Job(
+                "v4-before-v3-override",
+                LITERAL,
+                "https://v3-override-claim.example/source-a",
+                "https://v3-override-claim.example/source-b");
+        var firstClaim = claim("worker-v4-before-v3");
+        submit(firstJob.getId(), observationBody("worker-v4-before-v3", LITERAL, claimSnapshotIds(firstClaim)));
+        assertPublishedObservationCard(firstJob, LITERAL);
+
+        var legacyJob = seedApprovedVerifiedV4Job(
+                "v3-after-v4-claim",
+                LITERAL,
+                "https://v3-override-claim.example/source-a",
+                "https://v3-override-claim.example/source-b");
+        jdbcTemplate.update(
+                "UPDATE generation_job SET schema_version = 'automation-job-v3' WHERE id = ?",
+                legacyJob.getId());
+        var legacyClaim = claim("worker-v3-after-v4-claim", "automation-job-v3");
+        submit(legacyJob.getId(), v3DraftBody("worker-v3-after-v4-claim", claimSnapshotIds(legacyClaim)));
+
+        assertHeldWithoutPublicationExceptExistingPost(legacyJob, 1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT hold_reason FROM automation_run WHERE id = ?",
+                String.class,
+                legacyJob.getRunId())).isEqualTo(AutomationHoldReason.DUPLICATE_PUBLICATION);
+        assertThat(automationAdminService.runDetail(legacyJob.getRunId()).availableActions().canOverridePublish()).isFalse();
+        assertThatThrownBy(() -> automationAdminService.overridePublishHeldRun(legacyJob.getRunId()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("Only approved held automation runs");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isEqualTo(1);
     }
 
     @Test
@@ -500,12 +666,98 @@ class V4StructuredEvidenceIntegrationTests {
         return Stream.of("draft", "observations", "taxonomy");
     }
 
+    private static Stream<Arguments> structuredLineageDependencyCases() {
+        return Stream.of(
+                Arguments.of("same-origin-host", sameOriginHost(), "ORIGIN_INDEPENDENCE_MISSING"),
+                Arguments.of("same-configured-source", sameConfiguredSource(), "ORIGIN_INDEPENDENCE_MISSING"),
+                Arguments.of("same-origin-group", sameOriginGroup(), "ORIGIN_INDEPENDENCE_MISSING"),
+                Arguments.of("shared-canonical-url", sharedCanonicalUrl(), "RELATED_ORIGIN_COMPONENT"),
+                Arguments.of("shared-body-hash", sharedBodyHash(), "RELATED_ORIGIN_COMPONENT"),
+                Arguments.of("shared-explicit-upstream", sharedExplicitUpstream(), "RELATED_ORIGIN_COMPONENT")
+        );
+    }
+
+    private static Stream<Arguments> currentOriginApprovalCases() {
+        return Stream.of(
+                Arguments.of("origin-approval-revoked", revokeFirstOriginApproval()),
+                Arguments.of("origin-approval-revision-changed", incrementFirstOriginApprovalRevision()),
+                Arguments.of("origin-source-url-changed", changeFirstSourceUrl()),
+                Arguments.of("origin-source-type-changed", changeFirstSourceType())
+        );
+    }
+
     private GenerationJob seedVerifiedV4Job(String name) {
         var job = seedV4Job(name);
         var snapshotIds = snapshotIds(job.getRunId());
         updateEvidence(snapshotIds.get(0), "First source prefix. " + LITERAL + " First source suffix.");
         updateEvidence(snapshotIds.get(1), "Second source prefix. " + LITERAL + " Second source suffix.");
         return job;
+    }
+
+    private GenerationJob seedApprovedVerifiedV4Job(String name, String literal) {
+        return seedApprovedVerifiedV4Job(
+                name,
+                literal,
+                "https://source-a.example/" + name,
+                "https://source-b.example/" + name);
+    }
+
+    private GenerationJob seedApprovedVerifiedV4Job(
+            String name,
+            String literal,
+            String firstCanonicalUrl,
+            String secondCanonicalUrl) {
+        var job = seedApprovedV4Job(name, firstCanonicalUrl, secondCanonicalUrl);
+        var snapshotIds = snapshotIds(job.getRunId());
+        updateEvidence(snapshotIds.get(0), "First source prefix. " + literal + " First source suffix.");
+        updateEvidence(snapshotIds.get(1), "Second source prefix. " + literal + " Second source suffix.");
+        return job;
+    }
+
+    private GenerationJob seedApprovedV4Job(String name, String firstCanonicalUrl, String secondCanonicalUrl) {
+        jdbcTemplate.update("INSERT IGNORE INTO category (slug, name) VALUES (?, ?)", "technology", "Technology");
+        jdbcTemplate.update("INSERT IGNORE INTO tag (slug, name) VALUES (?, ?)", "java", "Java");
+        var firstPath = "/" + name + "-approved-a";
+        var secondPath = "/" + name + "-approved-b";
+        var firstSourceUrl = WIREMOCK.baseUrl().replace("localhost", "127.0.0.1") + firstPath;
+        var secondSourceUrl = WIREMOCK.baseUrl().replace("localhost", "127.0.0.2") + secondPath;
+        stubArticle(firstPath, firstCanonicalUrl, "A " + name);
+        stubArticle(secondPath, secondCanonicalUrl, "B " + name);
+        var topic = automationAdminService.createTopic(new AutomationTopicRequest(
+                null,
+                "Story 33 " + name,
+                "prompt-v1",
+                true));
+        var firstSource = automationAdminService.createSource(topic.id(), new AutomationSourceRequest(
+                AutomationSourceType.HTML,
+                firstSourceUrl,
+                true));
+        var secondSource = automationAdminService.createSource(topic.id(), new AutomationSourceRequest(
+                AutomationSourceType.HTML,
+                secondSourceUrl,
+                true));
+        var firstGroup = originApprovalAdminService.createGroup(topic.id(), new OriginGroupRequest(
+                name + " group A",
+                "Editorially independent source group A."));
+        var secondGroup = originApprovalAdminService.createGroup(topic.id(), new OriginGroupRequest(
+                name + " group B",
+                "Editorially independent source group B."));
+        originApprovalAdminService.approve(firstSource.id(), new OriginApprovalRequest(
+                hostOf(firstSourceUrl),
+                firstGroup.id(),
+                "Approved source A host for structured publication."));
+        originApprovalAdminService.approve(secondSource.id(), new OriginApprovalRequest(
+                hostOf(secondSourceUrl),
+                secondGroup.id(),
+                "Approved source B host for structured publication."));
+        originPairAdminService.approve(topic.id(), new OriginPairRequest(
+                firstGroup.id(),
+                secondGroup.id(),
+                "Approved independent origin pair for structured publication."));
+        var run = automationAdminService.triggerManualRun(topic.id(), "story-33-" + name + "-" + UUID.randomUUID());
+        return generationJobRepository.findByRunId(run.id())
+                .orElseThrow(() -> new AssertionError("Expected v4 generation job for run " + run.id()
+                        + " but run was " + run.status() + " with hold " + run.holdReason()));
     }
 
     private GenerationJob seedV4Job(String name) {
@@ -520,7 +772,7 @@ class V4StructuredEvidenceIntegrationTests {
                 true));
         automationAdminService.createSource(topic.id(), new AutomationSourceRequest(
                 AutomationSourceType.HTML,
-                WIREMOCK.baseUrl() + "/" + name + "-a",
+                WIREMOCK.baseUrl().replace("localhost", "127.0.0.2") + "/" + name + "-a",
                 true));
         automationAdminService.createSource(topic.id(), new AutomationSourceRequest(
                 AutomationSourceType.HTML,
@@ -766,6 +1018,80 @@ class V4StructuredEvidenceIntegrationTests {
         };
     }
 
+    private static Consumer<V4StructuredEvidenceIntegrationTests> sameOriginHost() {
+        return test -> {
+            var runId = test.latestRunId();
+            var snapshots = test.snapshotRows(runId);
+            var firstHost = (String) snapshots.get(0).get("origin_host");
+            var secondApprovalId = ((Number) snapshots.get(1).get("origin_approval_id")).longValue();
+            var secondSnapshotId = ((Number) snapshots.get(1).get("id")).longValue();
+            test.jdbcTemplate.update("UPDATE automation_origin_approval SET origin_host = ? WHERE id = ?", firstHost, secondApprovalId);
+            test.jdbcTemplate.update("UPDATE source_snapshot SET origin_host = ? WHERE id = ?", firstHost, secondSnapshotId);
+        };
+    }
+
+    private static Consumer<V4StructuredEvidenceIntegrationTests> sameConfiguredSource() {
+        return test -> {
+            var runId = test.latestRunId();
+            var snapshots = test.snapshotRows(runId);
+            var firstSourceId = ((Number) snapshots.get(0).get("automation_source_id")).longValue();
+            var firstApprovalId = ((Number) snapshots.get(0).get("origin_approval_id")).longValue();
+            var firstGroupId = ((Number) snapshots.get(0).get("origin_group_id")).longValue();
+            var secondSnapshotId = ((Number) snapshots.get(1).get("id")).longValue();
+            test.jdbcTemplate.update(
+                    """
+                    UPDATE source_snapshot
+                    SET automation_source_id = ?, origin_approval_id = ?, origin_group_id = ?
+                    WHERE id = ?
+                    """,
+                    firstSourceId,
+                    firstApprovalId,
+                    firstGroupId,
+                    secondSnapshotId);
+        };
+    }
+
+    private static Consumer<V4StructuredEvidenceIntegrationTests> sameOriginGroup() {
+        return test -> {
+            var runId = test.latestRunId();
+            var snapshots = test.snapshotRows(runId);
+            var firstGroupId = ((Number) snapshots.get(0).get("origin_group_id")).longValue();
+            var secondApprovalId = ((Number) snapshots.get(1).get("origin_approval_id")).longValue();
+            var secondSnapshotId = ((Number) snapshots.get(1).get("id")).longValue();
+            test.jdbcTemplate.update("UPDATE automation_origin_approval SET group_id = ? WHERE id = ?", firstGroupId, secondApprovalId);
+            test.jdbcTemplate.update("UPDATE source_snapshot SET origin_group_id = ? WHERE id = ?", firstGroupId, secondSnapshotId);
+        };
+    }
+
+    private static Consumer<V4StructuredEvidenceIntegrationTests> sharedCanonicalUrl() {
+        return test -> test.updateCitedSnapshots("canonical_url = 'https://shared.example/canonical-story'");
+    }
+
+    private static Consumer<V4StructuredEvidenceIntegrationTests> sharedBodyHash() {
+        return test -> test.updateCitedSnapshots("body_text_hash = '" + "b".repeat(64) + "'");
+    }
+
+    private static Consumer<V4StructuredEvidenceIntegrationTests> sharedExplicitUpstream() {
+        return test -> test.updateCitedSnapshots("explicit_upstream_urls_json = '[\"https://wire.example/original-report\"]'");
+    }
+
+    private static Consumer<V4StructuredEvidenceIntegrationTests> revokeFirstOriginApproval() {
+        return test -> test.updateFirstOriginApproval(
+                "active = FALSE, revision = revision + 1, revoked_at = UTC_TIMESTAMP(6), revocation_rationale = 'Origin review expired.'");
+    }
+
+    private static Consumer<V4StructuredEvidenceIntegrationTests> incrementFirstOriginApprovalRevision() {
+        return test -> test.updateFirstOriginApproval("revision = revision + 1");
+    }
+
+    private static Consumer<V4StructuredEvidenceIntegrationTests> changeFirstSourceUrl() {
+        return test -> test.updateFirstSource("source_url = 'https://changed-source.example/article'");
+    }
+
+    private static Consumer<V4StructuredEvidenceIntegrationTests> changeFirstSourceType() {
+        return test -> test.updateFirstSource("source_type = 'RSS'");
+    }
+
     private static Consumer<V4StructuredEvidenceIntegrationTests> noMutation() {
         return test -> {
         };
@@ -773,6 +1099,31 @@ class V4StructuredEvidenceIntegrationTests {
 
     private Long latestRunId() {
         return jdbcTemplate.queryForObject("SELECT id FROM automation_run ORDER BY id DESC LIMIT 1", Long.class);
+    }
+
+    private List<Map<String, Object>> snapshotRows(Long runId) {
+        return jdbcTemplate.queryForList(
+                """
+                SELECT id, automation_source_id, origin_host, origin_approval_id, origin_group_id
+                FROM source_snapshot
+                WHERE automation_run_id = ?
+                ORDER BY id
+                """,
+                runId);
+    }
+
+    private void updateCitedSnapshots(String setClause) {
+        jdbcTemplate.update("UPDATE source_snapshot SET " + setClause + " WHERE automation_run_id = ?", latestRunId());
+    }
+
+    private void updateFirstOriginApproval(String setClause) {
+        var firstApprovalId = ((Number) snapshotRows(latestRunId()).get(0).get("origin_approval_id")).longValue();
+        jdbcTemplate.update("UPDATE automation_origin_approval SET " + setClause + " WHERE id = ?", firstApprovalId);
+    }
+
+    private void updateFirstSource(String setClause) {
+        var firstSourceId = ((Number) snapshotRows(latestRunId()).get(0).get("automation_source_id")).longValue();
+        jdbcTemplate.update("UPDATE automation_source SET " + setClause + " WHERE id = ?", firstSourceId);
     }
 
     private void assertNoTerminalSideEffects(GenerationJob job) {
@@ -801,6 +1152,79 @@ class V4StructuredEvidenceIntegrationTests {
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isZero();
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post_revision", Integer.class)).isZero();
         assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class)).isZero();
+    }
+
+    private void assertHeldWithoutPublicationExceptExistingPost(GenerationJob job, int existingPostCount) {
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT job_status FROM generation_job WHERE id = ?",
+                String.class,
+                job.getId())).isEqualTo("SUBMITTED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM automation_run WHERE id = ?",
+                String.class,
+                job.getRunId())).isEqualTo("HELD");
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isEqualTo(existingPostCount);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class))
+                .isEqualTo(existingPostCount);
+    }
+
+    private void assertDecisionDetail(Long runId, String detailReason) {
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT detail_reason FROM automation_publication_decision WHERE run_id = ?",
+                String.class,
+                runId)).isEqualTo(detailReason);
+    }
+
+    private Map<String, Object> assertPublishedObservationCard(GenerationJob job, String literal) {
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT job_status FROM generation_job WHERE id = ?",
+                String.class,
+                job.getId())).isEqualTo("SUBMITTED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM automation_run WHERE id = ?",
+                String.class,
+                job.getRunId())).isEqualTo("SUCCEEDED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT hold_reason FROM automation_run WHERE id = ?",
+                String.class,
+                job.getRunId())).isNull();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post", Integer.class)).isEqualTo(1);
+        var post = jdbcTemplate.queryForMap(
+                """
+                SELECT id, slug, title, excerpt, content_markdown, content_html, source_fingerprint
+                FROM post
+                """);
+        var postId = ((Number) post.get("id")).longValue();
+        assertThat((String) post.get("source_fingerprint")).hasSize(64);
+        assertThat((String) post.get("title")).doesNotContain(literal);
+        assertThat((String) post.get("excerpt")).doesNotContain(literal);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT status FROM post WHERE id = ?",
+                String.class,
+                postId)).isEqualTo("PUBLISHED");
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM post_revision WHERE post_id = ?",
+                Integer.class,
+                postId)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                FROM post_revision_source_snapshot citation
+                JOIN post_revision revision ON revision.id = citation.post_revision_id
+                WHERE revision.post_id = ?
+                """,
+                Integer.class,
+                postId)).isEqualTo(2);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post_category WHERE post_id = ?", Integer.class, postId))
+                .isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM post_tag WHERE post_id = ?", Integer.class, postId))
+                .isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM publication_outbox_event", Integer.class)).isEqualTo(1);
+        assertThat(jdbcTemplate.queryForObject(
+                "SELECT outcome FROM automation_publication_decision WHERE run_id = ?",
+                String.class,
+                job.getRunId())).isEqualTo("published");
+        return post;
     }
 
     private void assertBadRequestOrHeldWithoutPublication(MvcResult result, GenerationJob job) {
@@ -863,6 +1287,10 @@ class V4StructuredEvidenceIntegrationTests {
 
     private String workerToken() {
         return "worker-test-token";
+    }
+
+    private String hostOf(String url) {
+        return URI.create(url).getHost();
     }
 
     private String contractFixture(String name) throws Exception {

@@ -100,6 +100,7 @@ class SourceLineagePublicationIntegrationTests {
     void resetState() {
         automationScheduleSynchronizer.clearAutomationSchedules();
         WIREMOCK.resetAll();
+        jdbcTemplate.update("DELETE FROM automation_publication_claim");
         deleteIfPresent("automation_source_relation_diagnostic");
         deleteIfPresent("automation_publication_decision");
         for (String table : new String[] {
