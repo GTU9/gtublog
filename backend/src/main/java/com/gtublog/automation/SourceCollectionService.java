@@ -45,6 +45,7 @@ public class SourceCollectionService {
     private static final int MAX_FEED_ENTRY_KEY_LENGTH = 512;
     private static final int MAX_EXPLICIT_UPSTREAM_URLS = 10;
     private static final int MIN_BODY_TEXT_HASH_LENGTH = 500;
+    private static final int MAX_ARTICLE_EVIDENCE_LENGTH = 16_000;
     private static final Duration COLLECTION_LEASE_SAFETY_MARGIN = Duration.ofSeconds(30);
     private static final String COLLECTION_TIMEOUT_REASON = "Source collection timed out before the run lease.";
     private static final Pattern UNSAFE_XML_DECLARATION =
@@ -340,6 +341,7 @@ public class SourceCollectionService {
         }
         var article = document.selectFirst("article");
         var bodyText = normalizedText(article == null ? document.text() : article.text());
+        var articleEvidence = articleEvidence(article, response.statusCode());
         var lineage = articleLineage(article, response.uri());
         if (sourceFeedUrl != null) {
             return SourceSnapshot.createFeedEntrySnapshot(
@@ -363,7 +365,10 @@ public class SourceCollectionService {
                     lineage.status(),
                     upstreamJson(lineage.upstreamUrls()),
                     response.statusCode() >= 200 && response.statusCode() < 300 ? SourcePolicyResult.ALLOWED : SourcePolicyResult.HELD,
-                    excerpt(document.text()));
+                    excerpt(document.text()),
+                    articleEvidence.text(),
+                    articleEvidence.hash(),
+                    articleEvidence.truncated());
         }
         return SourceSnapshot.create(
                 UUID.randomUUID().toString(),
@@ -384,7 +389,10 @@ public class SourceCollectionService {
                 lineage.status(),
                 upstreamJson(lineage.upstreamUrls()),
                 response.statusCode() >= 200 && response.statusCode() < 300 ? SourcePolicyResult.ALLOWED : SourcePolicyResult.HELD,
-                excerpt(document.text()));
+                excerpt(document.text()),
+                articleEvidence.text(),
+                articleEvidence.hash(),
+                articleEvidence.truncated());
     }
 
     PinnedSourceHttpClient.SourceHttpResponse fetch(String sourceUrl) throws Exception {
@@ -810,7 +818,10 @@ public class SourceCollectionService {
                 "UNKNOWN",
                 "[]",
                 SourcePolicyResult.HELD,
-                excerpt(reason));
+                excerpt(reason),
+                null,
+                null,
+                false);
     }
 
     private SourceSnapshot saveHeldFeedEntrySnapshot(
@@ -874,7 +885,10 @@ public class SourceCollectionService {
                 "UNKNOWN",
                 "[]",
                 SourcePolicyResult.HELD,
-                excerpt(reason));
+                excerpt(reason),
+                null,
+                null,
+                false);
     }
 
     private boolean isCollectionTimeout(Exception exception) {
@@ -906,6 +920,24 @@ public class SourceCollectionService {
 
     private String normalizedText(String value) {
         return value == null ? "" : value.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
+    }
+
+    private ArticleEvidence articleEvidence(Element article, int httpStatus) {
+        if (article == null || httpStatus != 200) {
+            return new ArticleEvidence(null, null, false);
+        }
+        var normalized = article.text().replaceAll("\\s+", " ").trim();
+        if (normalized.isEmpty()) {
+            return new ArticleEvidence(null, null, false);
+        }
+        var limit = Math.min(normalized.length(), MAX_ARTICLE_EVIDENCE_LENGTH);
+        if (limit < normalized.length()
+                && Character.isHighSurrogate(normalized.charAt(limit - 1))
+                && Character.isLowSurrogate(normalized.charAt(limit))) {
+            limit--;
+        }
+        var storedText = normalized.substring(0, limit);
+        return new ArticleEvidence(storedText, sha256(storedText), limit < normalized.length());
     }
 
     private String upstreamJson(List<String> urls) {
@@ -1041,6 +1073,9 @@ public class SourceCollectionService {
     }
 
     private record ArticleLineage(String status, List<String> upstreamUrls) {
+    }
+
+    private record ArticleEvidence(String text, String hash, boolean truncated) {
     }
 
     private record CollectionDeadline(Long deadlineNanos) {
