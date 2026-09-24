@@ -5,4 +5,5 @@
 *.ps1 text eol=crlf
 *.sh text eol=lf
 gradlew text eol=lf
+contracts/revalidation/v1/fixtures/event.json text eol=lf
 *.jar binary
