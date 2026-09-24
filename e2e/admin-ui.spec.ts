@@ -122,11 +122,15 @@ test("administrator reviews observed article hosts and records, conflicts, then 
   await panel.getByRole("textbox", { name: "그룹 근거" }).fill("Editorial ownership reviewed");
   await panel.getByRole("button", { name: "그룹 기록" }).click();
   await expect(panel.getByText("Editorial ownership reviewed")).toBeVisible();
+  await panel.getByRole("textbox", { name: "그룹 이름" }).fill("Syndication bureau");
+  await panel.getByRole("textbox", { name: "그룹 근거" }).fill("Separate desk and ownership");
+  await panel.getByRole("button", { name: "그룹 기록" }).click();
+  await expect(panel.getByText("Separate desk and ownership")).toBeVisible();
 
   await panel.getByRole("combobox", { name: "설정된 소스" }).selectOption("101");
   await panel.getByLabel("실제 응답에서 관찰한 기사 호스트").fill("articles.example.org");
   await panel.getByRole("combobox", { name: "출처 그룹" }).selectOption({ label: "Independent desk" });
-  await panel.getByRole("textbox", { name: "승인 근거" }).fill("Original article ownership checked");
+  await panel.getByRole("textbox", { name: "승인 근거", exact: true }).fill("Original article ownership checked");
   await panel.getByRole("button", { name: "호스트 승인 기록" }).click();
   const history = panel.getByLabel("소스 101 승인 이력");
   await expect(history.getByText("Original article ownership checked", { exact: false })).toBeVisible();
@@ -140,7 +144,7 @@ test("administrator reviews observed article hosts and records, conflicts, then 
   }));
   await panel.getByLabel("실제 응답에서 관찰한 기사 호스트").fill("articles.example.org");
   await panel.getByRole("combobox", { name: "출처 그룹" }).selectOption({ label: "Independent desk" });
-  await panel.getByRole("textbox", { name: "승인 근거" }).fill("Duplicate attempt");
+  await panel.getByRole("textbox", { name: "승인 근거", exact: true }).fill("Duplicate attempt");
   await panel.getByRole("button", { name: "호스트 승인 기록" }).click();
   await expect(panel.getByRole("alert")).toContainText("충돌:");
   await expect(panel.getByRole("alert")).toContainText("최신 승인 이력을 확인한 뒤 다시 시도하세요.");
@@ -152,4 +156,35 @@ test("administrator reviews observed article hosts and records, conflicts, then 
   await expect(history.getByText(/articles\.example\.org.*취소됨.*Independent desk.*revision 2/)).toBeVisible();
   await expect(history.getByText("승인 근거: Original article ownership checked")).toBeVisible();
   await expect(history.getByText("취소 근거: Ownership changed")).toBeVisible();
+
+  await panel.getByRole("combobox", { name: "첫 번째 그룹" }).selectOption({ label: "Syndication bureau" });
+  await panel.getByRole("combobox", { name: "두 번째 그룹" }).selectOption({ label: "Independent desk" });
+  await panel.getByRole("textbox", { name: "독립성 승인 근거" }).fill("No shared editorial control");
+  await panel.getByRole("button", { name: "그룹 쌍 승인 기록" }).click();
+  const pairHistory = panel.getByText("그룹 쌍 승인 이력").locator("..");
+  await expect(pairHistory.getByText(/Independent desk.*Syndication bureau.*활성.*revision 1/)).toBeVisible();
+  await expect(pairHistory.getByText("승인 근거: No shared editorial control")).toBeVisible();
+
+  const pairRoute = `${applicationApiBaseUrl}/admin/automation/topics/1/origin-pairs`;
+  await page.route(pairRoute, (route) => route.fulfill({
+    status: 409,
+    contentType: "application/problem+json",
+    body: JSON.stringify({ detail: "이미 활성 승인된 그룹 쌍입니다." }),
+  }));
+  await panel.getByRole("combobox", { name: "첫 번째 그룹" }).selectOption({ label: "Independent desk" });
+  await panel.getByRole("combobox", { name: "두 번째 그룹" }).selectOption({ label: "Syndication bureau" });
+  await panel.getByRole("textbox", { name: "독립성 승인 근거" }).fill("Duplicate pair");
+  await panel.getByRole("button", { name: "그룹 쌍 승인 기록" }).click();
+  await expect(panel.getByRole("alert")).toContainText("충돌:");
+  await page.unroute(pairRoute);
+
+  await page.getByRole("button", { name: "지금 실행" }).click();
+  await expect(panel.getByText(/승인 #.*revision 1.*Independent desk.*Syndication bureau/)).toBeVisible();
+
+  await pairHistory.getByRole("button", { name: "그룹 쌍 승인 취소", exact: true }).click();
+  await pairHistory.getByRole("textbox", { name: "그룹 쌍 취소 근거" }).fill("Shared upstream discovered");
+  await pairHistory.getByRole("button", { name: "그룹 쌍 승인 취소 확정" }).click();
+  await expect(pairHistory.getByText(/Independent desk.*Syndication bureau.*취소됨.*revision 2/)).toBeVisible();
+  await expect(pairHistory.getByText("취소 근거: Shared upstream discovered")).toBeVisible();
+  await expect(panel.getByText(/승인 #.*revision 1.*Independent desk.*Syndication bureau/)).toBeVisible();
 });

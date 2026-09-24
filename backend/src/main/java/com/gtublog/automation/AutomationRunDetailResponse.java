@@ -8,6 +8,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 public record AutomationRunDetailResponse(
         AutomationRunResponse run,
         List<SourceSnapshotResponse> snapshots,
+        List<OriginPairCaptureResponse> originPairs,
         PublicationDecisionResponse publicationDecision,
         GeneratedDraftResponse generatedDraft,
         AvailableActionsResponse availableActions) {
@@ -41,6 +42,14 @@ public record AutomationRunDetailResponse(
             String lineageExtractionStatus,
             List<String> explicitUpstreamUrls,
             LocalDateTime retrievedAt) {
+    }
+
+    public record OriginPairCaptureResponse(
+            Long pairApprovalId,
+            long approvalRevision,
+            Long groupLowId,
+            Long groupHighId,
+            LocalDateTime capturedAt) {
     }
 
     public record PublicationDecisionResponse(

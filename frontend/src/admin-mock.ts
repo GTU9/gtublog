@@ -9,6 +9,7 @@ import type {
   AutomationOutboxResponse,
   AutomationOriginApprovalResponse,
   AutomationOriginGroupResponse,
+  AutomationOriginPairResponse,
   AutomationRunDetailResponse,
   AutomationRunOverridePublishResponse,
   AutomationRunResponse,
@@ -210,8 +211,10 @@ let automationTopicsStore = initialAutomationTopics.map((item) => ({ ...item }))
 let automationSourcesStore = initialAutomationSources.map((item) => ({ ...item }));
 let automationOriginGroupsStore: AutomationOriginGroupResponse[] = [];
 let automationOriginApprovalsStore: AutomationOriginApprovalResponse[] = [];
+let automationOriginPairsStore: AutomationOriginPairResponse[] = [];
 let nextAutomationOriginGroupId = 1;
 let nextAutomationOriginApprovalId = 1;
+let nextAutomationOriginPairId = 1;
 let automationSchedulesStore = initialAutomationSchedules.map((item) => ({ ...item }));
 let nextAutomationTopicId = Math.max(...initialAutomationTopics.map((item) => item.id), 1) + 1;
 let nextAutomationSourceId = Math.max(...initialAutomationSources.map((item) => item.id), 100) + 1;
@@ -275,6 +278,15 @@ function createInitialAutomationRunDetails(runs: AutomationRunResponse[]) {
           canCancel: false,
           canOverridePublish: false,
         },
+        originPairs: [
+          {
+            pairApprovalId: 9001,
+            approvalRevision: 1,
+            groupLowId: 1,
+            groupHighId: 2,
+            capturedAt: "2026-06-29T00:00:00Z",
+          },
+        ],
         snapshots: [
           {
             id: 5001,
@@ -401,6 +413,7 @@ function cloneAutomationRunDetail(detail: AutomationRunDetailResponse): Automati
         }
       : null,
     availableActions: { ...detail.availableActions },
+    originPairs: detail.originPairs?.map((pair) => ({ ...pair })),
     snapshots: detail.snapshots.map((snapshot) => ({ ...snapshot })),
   };
 }
@@ -483,8 +496,10 @@ export function resetAdminMockState() {
   automationSourcesStore = initialAutomationSources.map((item) => ({ ...item }));
   automationOriginGroupsStore = [];
   automationOriginApprovalsStore = [];
+  automationOriginPairsStore = [];
   nextAutomationOriginGroupId = 1;
   nextAutomationOriginApprovalId = 1;
+  nextAutomationOriginPairId = 1;
   automationSchedulesStore = initialAutomationSchedules.map((item) => ({ ...item }));
   nextAutomationTopicId = Math.max(...initialAutomationTopics.map((item) => item.id), 1) + 1;
   nextAutomationSourceId = Math.max(...initialAutomationSources.map((item) => item.id), 100) + 1;
@@ -575,6 +590,70 @@ export function mockRevokeAutomationOriginApproval(approvalId: number, request: 
     revocationRationale: request.rationale.trim(), revokedAt: now, updatedAt: now };
   automationOriginApprovalsStore = automationOriginApprovalsStore.map((item) => item.id === approvalId ? revoked : item);
   recordAudit("AUTOMATION", String(approvalId), "ORIGIN_APPROVAL_REVOKED", { rationale: request.rationale.trim() });
+  return { ...revoked };
+}
+
+export function mockAutomationOriginPairs(topicId: number) {
+  return automationOriginPairsStore.filter((item) => item.topicId === topicId).map((item) => ({ ...item }));
+}
+
+export function mockCreateAutomationOriginPair(
+  topicId: number,
+  request: { firstGroupId: number; secondGroupId: number; rationale: string },
+) {
+  const first = automationOriginGroupsStore.find((item) => item.id === request.firstGroupId && item.topicId === topicId);
+  const second = automationOriginGroupsStore.find((item) => item.id === request.secondGroupId && item.topicId === topicId);
+  if (!first || !second || first.id === second.id) {
+    throw new Error("같은 주제에 속한 서로 다른 두 그룹을 선택하세요.");
+  }
+  const [low, high] = first.id < second.id ? [first, second] : [second, first];
+  if (automationOriginPairsStore.some((item) =>
+    item.topicId === topicId && item.groupLowId === low.id && item.groupHighId === high.id && item.active
+  )) {
+    throw new Error("이 출처 그룹 쌍은 이미 활성 승인되어 있습니다.");
+  }
+  const now = new Date().toISOString();
+  const pair: AutomationOriginPairResponse = {
+    id: nextAutomationOriginPairId++,
+    topicId,
+    groupLowId: low.id,
+    groupHighId: high.id,
+    groupLowName: low.name,
+    groupHighName: high.name,
+    rationale: request.rationale.trim(),
+    revocationRationale: null,
+    active: true,
+    revision: 1,
+    approvedAt: now,
+    revokedAt: null,
+    createdAt: now,
+    updatedAt: now,
+  };
+  automationOriginPairsStore = [...automationOriginPairsStore, pair];
+  recordAudit("AUTOMATION", String(pair.id), "ORIGIN_PAIR_APPROVAL_CREATED", {
+    topicId,
+    groupLowId: pair.groupLowId,
+    groupHighId: pair.groupHighId,
+  });
+  return { ...pair };
+}
+
+export function mockRevokeAutomationOriginPair(pairId: number, request: { revision: number; rationale: string }) {
+  const pair = automationOriginPairsStore.find((item) => item.id === pairId);
+  if (!pair || !pair.active || pair.revision !== request.revision) {
+    throw new Error("그룹 쌍 승인 상태가 변경되었습니다. 목록을 새로 불러온 뒤 다시 시도하세요.");
+  }
+  const now = new Date().toISOString();
+  const revoked: AutomationOriginPairResponse = {
+    ...pair,
+    active: false,
+    revision: pair.revision + 1,
+    revocationRationale: request.rationale.trim(),
+    revokedAt: now,
+    updatedAt: now,
+  };
+  automationOriginPairsStore = automationOriginPairsStore.map((item) => item.id === pairId ? revoked : item);
+  recordAudit("AUTOMATION", String(pairId), "ORIGIN_PAIR_APPROVAL_REVOKED", { rationale: request.rationale.trim() });
   return { ...revoked };
 }
 
@@ -690,6 +769,15 @@ export function mockAutomationRunDetail(runId: number) {
 
 export function mockTriggerAutomationRun(topicId: number) {
   const now = new Date().toISOString();
+  const originPairs = automationOriginPairsStore
+    .filter((pair) => pair.topicId === topicId && pair.active)
+    .map((pair) => ({
+      pairApprovalId: pair.id,
+      approvalRevision: pair.revision,
+      groupLowId: pair.groupLowId,
+      groupHighId: pair.groupHighId,
+      capturedAt: now,
+    }));
   const run: AutomationRunResponse = {
     id: Math.max(...automationRunsStore.map((item) => item.id), 300) + 1,
     runKey: `run-${Date.now()}`,
@@ -718,6 +806,7 @@ export function mockTriggerAutomationRun(topicId: number) {
       canCancel: true,
       canOverridePublish: false,
     },
+    originPairs,
     snapshots: [
       {
         id: Date.now(),

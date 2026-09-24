@@ -119,6 +119,23 @@ export type AutomationOriginApprovalResponse = {
   updatedAt: string;
 };
 
+export type AutomationOriginPairResponse = {
+  id: number;
+  topicId: number;
+  groupLowId: number;
+  groupHighId: number;
+  groupLowName: string;
+  groupHighName: string;
+  rationale: string;
+  revocationRationale: string | null;
+  active: boolean;
+  revision: number;
+  approvedAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AutomationScheduleResponse = {
   id: number;
   topicId: number;
@@ -205,6 +222,13 @@ export type AutomationRunDetailResponse = {
     lineageExtractionStatus?: string | null;
     explicitUpstreamUrls?: string[];
     retrievedAt: string;
+  }[];
+  originPairs?: {
+    pairApprovalId: number;
+    approvalRevision: number;
+    groupLowId: number;
+    groupHighId: number;
+    capturedAt: string;
   }[];
 };
 

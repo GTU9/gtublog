@@ -29,6 +29,7 @@ public class AutomationAdminService {
     private final AutomationOriginApprovalRepository originApprovalRepository;
     private final AutomationScheduleRepository automationScheduleRepository;
     private final AutomationRunRepository automationRunRepository;
+    private final AutomationRunOriginPairRepository automationRunOriginPairRepository;
     private final SourceSnapshotRepository sourceSnapshotRepository;
     private final SlugService slugService;
     private final AuditService auditService;
@@ -52,6 +53,7 @@ public class AutomationAdminService {
             AutomationOriginApprovalRepository originApprovalRepository,
             AutomationScheduleRepository automationScheduleRepository,
             AutomationRunRepository automationRunRepository,
+            AutomationRunOriginPairRepository automationRunOriginPairRepository,
             SourceSnapshotRepository sourceSnapshotRepository,
             SlugService slugService,
             AuditService auditService,
@@ -73,6 +75,7 @@ public class AutomationAdminService {
         this.originApprovalRepository = originApprovalRepository;
         this.automationScheduleRepository = automationScheduleRepository;
         this.automationRunRepository = automationRunRepository;
+        this.automationRunOriginPairRepository = automationRunOriginPairRepository;
         this.sourceSnapshotRepository = sourceSnapshotRepository;
         this.slugService = slugService;
         this.auditService = auditService;
@@ -249,12 +252,24 @@ public class AutomationAdminService {
         return new AutomationRunDetailResponse(
                 toRunResponse(run),
                 snapshots,
+                originPairCaptures(runId),
                 publicationDecision(runId),
                 generatedDraft,
                 new AutomationRunDetailResponse.AvailableActionsResponse(
                         canRetry(run),
                         canCancel(run),
                         canOverridePublish(run, generatedDraft)));
+    }
+
+    private List<AutomationRunDetailResponse.OriginPairCaptureResponse> originPairCaptures(Long runId) {
+        return automationRunOriginPairRepository.findAllByRunIdOrderByIdAsc(runId).stream()
+                .map(pair -> new AutomationRunDetailResponse.OriginPairCaptureResponse(
+                        pair.getPairApprovalId(),
+                        pair.getApprovalRevision(),
+                        pair.getGroupLowId(),
+                        pair.getGroupHighId(),
+                        pair.getCapturedAt()))
+                .toList();
     }
 
     @Transactional

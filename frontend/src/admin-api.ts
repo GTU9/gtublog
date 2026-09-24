@@ -10,6 +10,7 @@ import type {
   AutomationOutboxResponse,
   AutomationOriginApprovalResponse,
   AutomationOriginGroupResponse,
+  AutomationOriginPairResponse,
   AutomationRunDetailResponse,
   AutomationRunResponse,
   AutomationScheduleResponse,
@@ -33,10 +34,13 @@ import {
   mockDeleteTag,
   mockAutomationOutbox,
   mockAutomationOriginApprovals,
+  mockAutomationOriginPairs,
   mockAutomationOriginGroups,
   mockCreateAutomationOriginApproval,
+  mockCreateAutomationOriginPair,
   mockCreateAutomationOriginGroup,
   mockRevokeAutomationOriginApproval,
+  mockRevokeAutomationOriginPair,
   mockAutomationDiagnostics,
   mockAutomationRunDetail,
   mockAutomationRuns,
@@ -154,6 +158,54 @@ export async function revokeAutomationOriginApproval(
   } catch (error) {
     if (error instanceof AutomationOriginConflictError || error instanceof AutomationOriginHttpError || !isDevelopmentRuntime()) throw error;
     return mockRevokeAutomationOriginApproval(approvalId, request);
+  }
+}
+
+export async function fetchAutomationOriginPairs(authenticatedFetch: AuthenticatedFetch, topicId: number) {
+  try {
+    return await originResponse<AutomationOriginPairResponse[]>(
+      await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/topics/${topicId}/origin-pairs`),
+      "출처 그룹 쌍 승인 이력을 불러오지 못했습니다.",
+    );
+  } catch (error) {
+    if (error instanceof AutomationOriginConflictError || error instanceof AutomationOriginHttpError || !isDevelopmentRuntime()) throw error;
+    return mockAutomationOriginPairs(topicId);
+  }
+}
+
+export async function createAutomationOriginPair(
+  authenticatedFetch: AuthenticatedFetch,
+  topicId: number,
+  request: { firstGroupId: number; secondGroupId: number; rationale: string },
+) {
+  try {
+    return await originResponse<AutomationOriginPairResponse>(
+      await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/topics/${topicId}/origin-pairs`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request),
+      }),
+      "출처 그룹 쌍 승인을 기록하지 못했습니다.",
+    );
+  } catch (error) {
+    if (error instanceof AutomationOriginConflictError || error instanceof AutomationOriginHttpError || !isDevelopmentRuntime()) throw error;
+    return mockCreateAutomationOriginPair(topicId, request);
+  }
+}
+
+export async function revokeAutomationOriginPair(
+  authenticatedFetch: AuthenticatedFetch,
+  pairId: number,
+  request: { revision: number; rationale: string },
+) {
+  try {
+    return await originResponse<AutomationOriginPairResponse>(
+      await authenticatedFetch(`${applicationApiBaseUrl}/admin/automation/origin-pairs/${pairId}/revoke`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(request),
+      }),
+      "출처 그룹 쌍 승인을 취소하지 못했습니다.",
+    );
+  } catch (error) {
+    if (error instanceof AutomationOriginConflictError || error instanceof AutomationOriginHttpError || !isDevelopmentRuntime()) throw error;
+    return mockRevokeAutomationOriginPair(pairId, request);
   }
 }
 

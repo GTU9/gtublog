@@ -4,8 +4,8 @@ import com.gtublog.audit.AuditActorType;
 import com.gtublog.audit.AuditService;
 import com.gtublog.audit.AuditTargetType;
 import com.gtublog.observability.PlatformMetricsService;
-import java.time.LocalDateTime;
 import java.time.Clock;
+import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -19,19 +19,28 @@ public class AutomationRunLifecycleService {
 
     private static final String DEFAULT_LEASE_OWNER = "automation-pipeline";
 
+    private final AutomationTopicRepository automationTopicRepository;
     private final AutomationRunRepository automationRunRepository;
+    private final AutomationOriginPairApprovalRepository originPairApprovalRepository;
+    private final AutomationRunOriginPairRepository runOriginPairRepository;
     private final AuditService auditService;
     private final PlatformMetricsService platformMetricsService;
     private final AutomationProperties automationProperties;
     private final Clock clock;
 
     public AutomationRunLifecycleService(
+            AutomationTopicRepository automationTopicRepository,
             AutomationRunRepository automationRunRepository,
+            AutomationOriginPairApprovalRepository originPairApprovalRepository,
+            AutomationRunOriginPairRepository runOriginPairRepository,
             AuditService auditService,
             PlatformMetricsService platformMetricsService,
             AutomationProperties automationProperties,
             Clock clock) {
+        this.automationTopicRepository = automationTopicRepository;
         this.automationRunRepository = automationRunRepository;
+        this.originPairApprovalRepository = originPairApprovalRepository;
+        this.runOriginPairRepository = runOriginPairRepository;
         this.auditService = auditService;
         this.platformMetricsService = platformMetricsService;
         this.automationProperties = automationProperties;
@@ -59,6 +68,8 @@ public class AutomationRunLifecycleService {
             return new StartResult(existing.get(), false);
         }
 
+        automationTopicRepository.findByIdForUpdate(topicId)
+                .orElseThrow(() -> new NoSuchElementException("Automation topic not found."));
         var now = now();
         var run = automationRunRepository.saveAndFlush(AutomationRun.start(
                 UUID.randomUUID().toString(),
@@ -70,9 +81,17 @@ public class AutomationRunLifecycleService {
                 DEFAULT_LEASE_OWNER,
                 now.plus(automationProperties.run().pipelineLeaseDuration()),
                 now));
+        var activePairs = originPairApprovalRepository.findAllByTopicIdAndActiveTrueOrderByGroupLowIdAscGroupHighIdAsc(topicId);
+        if (!activePairs.isEmpty()) {
+            runOriginPairRepository.saveAll(activePairs.stream()
+                    .map(pair -> AutomationRunOriginPair.capture(run.getId(), pair, now))
+                    .toList());
+            runOriginPairRepository.flush();
+        }
         Map<String, Object> detail = new LinkedHashMap<>();
         detail.put("triggerType", triggerType);
         detail.put("topicId", topicId);
+        detail.put("originPairApprovalCount", activePairs.size());
         if (retryOfRunId != null) {
             detail.put("retryOfRunId", retryOfRunId);
         }
