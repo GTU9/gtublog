@@ -63,6 +63,12 @@ generation-worker는 별도로 배포되는 non-root Node 프로세스입니다.
 
 v2 terminal request는 UUID와 canonical UTF-8 JSON의 SHA-256 digest를 함께 전달합니다. Spring은 digest를 다시 계산하고 publication side effect와 함께 terminal identity를 커밋합니다. 같은 identity와 digest로 재시도하면 이미 커밋된 결과를 반환하고, terminal transition 충돌이나 digest mismatch는 `409`를 반환합니다.
 
+### 자동 분류 계약 전환
+
+새 generation job은 `automation-job-v3`를 사용합니다. Spring은 작업 생성 시 관리자 카테고리와 태그 후보를 고정하여 claim에 전달하고, worker는 카테고리 ID 하나와 태그 ID 1~5개를 선택합니다. Spring은 제출된 선택이 고정 후보와 현재 분류 데이터에 모두 맞는지 확인한 후에만 발행합니다. 분류가 없거나 변경되었거나 허용 목록 밖이면 생성 초안을 보존하고 실행을 `HELD`로 둡니다. 구조가 깨진 provider 출력은 `FAILED`이며 관리자는 새 실행을 시작합니다. 기존 v2 작업도 분류 없이 자동 발행하거나 관리자 override로 공개할 수 없습니다.
+
+운영 전환에서는 먼저 종료하려는 v2 작업을 끝냅니다. 이후 자동화 schedule과 **모든** worker 프로세스를 중지하고, 구 백엔드에 대한 worker claim·submit 유입을 차단합니다. 이미 처리 중인 HTTP 요청이 끝난 것을 확인하고 구 백엔드 인스턴스를 모두 제거한 뒤 새 백엔드를 배포합니다. 새 백엔드에 v2 성공 결과를 제출하는 시험에서 초안이 저장되고 `HELD`가 되는지 확인한 후 v2/v3 worker와 schedule을 재개합니다. 일시 중단 중 남은 v2 작업은 실행 deadline 전에 재개되면 새 백엔드에서 처리되어 `HELD`가 됩니다. deadline이 지나 `FAILED`로 복구된 실행은 `HELD` 전용 재시도 API를 쓰지 않고 새 v3 실행을 시작합니다. 실제 운영 중지·배포에는 별도 승인이 필요합니다.
+
 Codex SDK production 실행은 의도적으로 동결되어 있습니다. 현재 `GENERATION_CODEX_CANARY_ATTESTATION_PATH`의 v1 JSON과 `artifactDigest` 일치는 **이미지 동일성 확인일 뿐 운영 승인 근거가 아닙니다**. host mount JSON에는 발급자, 서명, 신선도, 독립 재시작 증명이 없으므로 어떤 local smoke나 candidate canary도 이를 `result: passed`로 바꾸어 worker를 활성화해서는 안 됩니다. 기존 boolean 플래그는 test process에서만 허용됩니다. 상세 결정은 [CR-002](./change-requests/CR-002-block-codex-sdk-production-adapter.md)를 따릅니다.
 
 CR-003의 `openai-responses` provider는 Codex CLI나 agent tool process를 실행하지 않는 별도 선택 경로입니다. `GENERATION_PROVIDER=openai-responses`, `OPENAI_API_KEY`, `GENERATION_OPENAI_RESPONSES_MODEL`을 외부 설정으로 모두 제공해야만 선택되며, 요청은 `tools: []`, `tool_choice: "none"`, `store: false`, strict JSON Schema를 고정합니다. 이 선택은 Spring의 발행 게이트를 우회하지 않으며 실제 운영 API 호출과 배포 smoke는 별도 release story에서 승인·검증합니다.

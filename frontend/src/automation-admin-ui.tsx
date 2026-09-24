@@ -572,6 +572,11 @@ export function AutomationControlCenter({
                   <p className="muted">
                     인용 스냅샷 {citationCount}건 · 독립 출처 호스트 {uniqueOriginHosts}개
                   </p>
+                  {runDetail.generatedDraft.taxonomy ? (
+                    <p className="muted">선택한 분류: 카테고리 #{runDetail.generatedDraft.taxonomy.categoryId} · 태그 {runDetail.generatedDraft.taxonomy.tagIds.map((id) => `#${id}`).join(", ")}</p>
+                  ) : (
+                    <p className="muted">선택한 분류가 없어 자동 발행할 수 없습니다.</p>
+                  )}
                   <pre className="code-block">{runDetail.generatedDraft.contentMarkdown}</pre>
                 </article>
               ) : null}

@@ -30,6 +30,10 @@ export function createFakeGenerationProvider(name = "fake-provider"): Generation
         ].join("\n"),
         citationSnapshotIds: request.snapshots.map((snapshot) => snapshot.snapshotId),
         provider: name,
+        ...(request.schemaVersion === "automation-job-v3" ? { taxonomy: {
+          categoryId: request.taxonomyCatalog!.categories[0].id,
+          tagIds: [request.taxonomyCatalog!.tags[0].id],
+        } } : {}),
       });
     },
   };

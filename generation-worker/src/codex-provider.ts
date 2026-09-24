@@ -1,6 +1,6 @@
 import { Codex } from "@openai/codex-sdk";
 
-import { generationDraftJsonSchema, validateGenerationDraft } from "./draft-schema.js";
+import { generationDraftJsonSchema, generationDraftJsonSchemaV3, validateGenerationDraft } from "./draft-schema.js";
 import type { GenerationProvider, GenerationRequest, GenerationResult } from "./provider.js";
 
 type CodexFactory = () => CodexLike;
@@ -51,11 +51,11 @@ export function createCodexGenerationProvider(
         modelReasoningEffort: "low",
       });
       const turn = await thread.run(
-        `${request.prompt}\n\n반드시 JSON만 반환하세요.`,
-        { outputSchema: generationDraftJsonSchema, signal },
+        `${request.prompt}\n\n${request.schemaVersion === "automation-job-v3" ? `Choose taxonomy IDs only from this approved catalog: ${JSON.stringify(request.taxonomyCatalog)}\n` : ""}반드시 JSON만 반환하세요.`,
+        { outputSchema: request.schemaVersion === "automation-job-v3" ? generationDraftJsonSchemaV3 : generationDraftJsonSchema, signal },
       );
       const parsed = JSON.parse(turn.finalResponse) as unknown;
-      return validateGenerationDraft(parsed, "codex-sdk");
+      return validateGenerationDraft(parsed, "codex-sdk", request.schemaVersion);
     },
   };
 }
